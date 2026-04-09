@@ -1,0 +1,6 @@
+server/james/__pycache__/
+server/james.egg-info/
+web/dist/
+node_modules/
+__pycache__/
+.env
