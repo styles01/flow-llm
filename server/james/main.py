@@ -10,6 +10,8 @@ from typing import Optional
 import httpx
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from james.config import settings
@@ -20,6 +22,9 @@ from james.process_manager import process_manager, BackendProcess
 from james.template_validator import validate_model_dir
 
 logger = logging.getLogger(__name__)
+
+# Path to frontend build
+WEB_DIST = Path(__file__).parent.parent.parent / "web" / "dist"
 
 # Global state
 db_session_factory = None
@@ -574,7 +579,6 @@ async def chat_completions(request: dict):
                     output_tokens=total_output_tokens if total_output_tokens else None,
                 )
 
-            from fastapi.responses import StreamingResponse
             return StreamingResponse(
                 stream_with_metrics(),
                 media_type="text/event-stream",
@@ -671,6 +675,25 @@ async def health():
         "running_models": len(running),
         "models": list(running.keys()),
     }
+
+
+# --- Serve frontend ---
+
+
+if WEB_DIST.exists():
+    app.mount("/assets", StaticFiles(directory=str(WEB_DIST / "assets")), name="assets")
+
+
+@app.get("/{full_path:path}")
+async def serve_frontend(full_path: str):
+    """Serve the React SPA for all non-API routes."""
+    if full_path.startswith(("api/", "v1/", "ws")):
+        raise HTTPException(404)
+
+    index_path = WEB_DIST / "index.html"
+    if index_path.exists():
+        return FileResponse(str(index_path))
+    raise HTTPException(404, "Frontend not built. Run: cd web && npm run build")
 
 
 def main():

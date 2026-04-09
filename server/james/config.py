@@ -9,6 +9,15 @@ DEFAULT_DATA_DIR = Path(os.environ.get("JAMES_DATA_DIR", str(Path.home() / ".jam
 DEFAULT_MODELS_DIR = Path(os.environ.get("JAMES_MODELS_DIR", str(DEFAULT_DATA_DIR / "models")))
 DEFAULT_DB_PATH = DEFAULT_DATA_DIR / "james.db"
 
+# Check for external drives (common locations for large model files)
+_EXTERNAL_DRIVES = [
+    Path("/Volumes/James4TBSSD/llms"),  # User's external SSD
+]
+for _d in _EXTERNAL_DRIVES:
+    if _d.parent.exists():
+        DEFAULT_MODELS_DIR = Path(os.environ.get("JAMES_MODELS_DIR", str(_d)))
+        break
+
 # Server defaults
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 3377
