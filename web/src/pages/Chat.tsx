@@ -1,34 +1,50 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 
 interface Message {
   role: 'system' | 'user' | 'assistant'
   content: string
-  toolCalls?: any[]
 }
 
 export default function ChatPage() {
+  const queryClient = useQueryClient()
   const [systemPrompt, setSystemPrompt] = useState('You are a helpful assistant.')
   const [userMessage, setUserMessage] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
   const [streaming, setStreaming] = useState(false)
   const [includeTools, setIncludeTools] = useState(false)
   const [selectedModel, setSelectedModel] = useState<string>('')
+  const [error, setError] = useState<string | null>(null)
 
-  // Get running models
-  const { data: runningData } = useQuery({
-    queryKey: ['running'],
-    queryFn: () => api.listRunning(),
+  const { data: models = [] } = useQuery({
+    queryKey: ['models'],
+    queryFn: () => api.listModels(),
   })
 
-  const runningModels = runningData?.models ?? []
-  const baseUrl = selectedModel
-    ? runningModels.find(m => m.model_id === selectedModel)?.base_url
-    : null
+  const selectedModelInfo = models.find(m => m.id === selectedModel)
+  const canSend = selectedModel && selectedModelInfo?.status === 'running' && !streaming
+
+  // Load model mutation
+  const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: () => api.getSettings() })
+  const loadMut = useMutation({
+    mutationFn: (id: string) => api.loadModel(id, {
+      ctx_size: settings?.default_ctx_size ?? 100000,
+      flash_attn: settings?.default_flash_attn ?? 'on',
+      cache_type_k: settings?.default_cache_type_k ?? 'q4_0',
+      cache_type_v: settings?.default_cache_type_v ?? 'q4_0',
+      gpu_layers: settings?.default_gpu_layers ?? -1,
+      n_parallel: settings?.default_n_parallel ?? 2,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['models'] })
+      queryClient.invalidateQueries({ queryKey: ['running'] })
+    },
+  })
 
   async function sendMessage() {
-    if (!userMessage.trim() || !baseUrl) return
+    if (!userMessage.trim() || !canSend) return
+    setError(null)
 
     const newMessages: Message[] = [
       { role: 'system', content: systemPrompt },
@@ -53,7 +69,7 @@ export default function ChatPage() {
     }] : undefined
 
     try {
-      const res = await fetch(`${baseUrl}/chat/completions`, {
+      const res = await fetch('/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -65,11 +81,16 @@ export default function ChatPage() {
         }),
       })
 
+      if (!res.ok) {
+        const errText = await res.text()
+        throw new Error(`HTTP ${res.status}: ${errText}`)
+      }
       if (!res.body) throw new Error('No response body')
 
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let assistantContent = ''
+      let buffer = ''
 
       setMessages(prev => [...prev, { role: 'assistant', content: '' }])
 
@@ -77,28 +98,36 @@ export default function ChatPage() {
         const { done, value } = await reader.read()
         if (done) break
 
-        const chunk = decoder.decode(value)
-        const lines = chunk.split('\n').filter(l => l.startsWith('data: '))
+        buffer += decoder.decode(value, { stream: true })
+        // Split on double newlines (SSE event boundary)
+        const events = buffer.split('\n\n')
+        buffer = events.pop() || ''  // keep incomplete event in buffer
 
-        for (const line of lines) {
-          const data = line.slice(6)
-          if (data === '[DONE]') break
+        for (const event of events) {
+          for (const line of event.split('\n')) {
+            if (!line.startsWith('data: ')) continue
+            const data = line.slice(6)
+            if (data === '[DONE]') continue
 
-          try {
-            const parsed = JSON.parse(data)
-            const delta = parsed.choices?.[0]?.delta?.content || ''
-            assistantContent += delta
-
-            setMessages(prev => {
-              const updated = [...prev]
-              updated[updated.length - 1] = { role: 'assistant', content: assistantContent }
-              return updated
-            })
-          } catch {}
+            try {
+              const parsed = JSON.parse(data)
+              const delta = parsed.choices?.[0]?.delta?.content
+              if (delta) {
+                assistantContent += delta
+                setMessages(prev => {
+                  const updated = [...prev]
+                  updated[updated.length - 1] = { role: 'assistant', content: assistantContent }
+                  return updated
+                })
+              }
+            } catch {}
+          }
         }
       }
     } catch (err: any) {
-      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err.message}` }])
+      const errMsg = err.message || 'Unknown error'
+      setError(errMsg)
+      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${errMsg}` }])
     } finally {
       setStreaming(false)
     }
@@ -114,12 +143,14 @@ export default function ChatPage() {
           <label className="block text-sm text-gray-400 mb-1">Model</label>
           <select
             value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value)}
+            onChange={(e) => { setSelectedModel(e.target.value); setError(null) }}
             className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-md text-white"
           >
-            <option value="">Select running model...</option>
-            {runningModels.map(m => (
-              <option key={m.model_id} value={m.model_id}>{m.name} (:{m.port})</option>
+            <option value="">Select a model...</option>
+            {models.map(m => (
+              <option key={m.id} value={m.id}>
+                {m.name} {m.status === 'running' ? '● running' : m.status === 'loading' ? '◌ loading' : '○ available'}
+              </option>
             ))}
           </select>
         </div>
@@ -135,6 +166,34 @@ export default function ChatPage() {
           </label>
         </div>
       </div>
+
+      {/* Load model if selected but not running */}
+      {selectedModel && selectedModelInfo?.status !== 'running' && (
+        <div className="mb-4 bg-yellow-900/30 border border-yellow-700/50 rounded-lg p-3 flex items-center justify-between">
+          <span className="text-yellow-300 text-sm">
+            {selectedModelInfo?.status === 'loading' ? 'Model is loading...' : 'This model needs to be loaded first.'}
+          </span>
+          {selectedModelInfo?.status === 'available' && (
+            <button
+              onClick={() => loadMut.mutate(selectedModel)}
+              disabled={loadMut.isPending}
+              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 rounded-md text-sm font-medium"
+            >
+              {loadMut.isPending ? 'Loading...' : 'Load Model'}
+            </button>
+          )}
+        </div>
+      )}
+      {loadMut.error && (
+        <div className="mb-4 bg-red-900/30 border border-red-700/50 rounded-lg p-3 text-red-300 text-sm">
+          Failed to load: {(loadMut.error as Error).message}
+        </div>
+      )}
+      {error && (
+        <div className="mb-4 bg-red-900/30 border border-red-700/50 rounded-lg p-3 text-red-300 text-sm">
+          {error}
+        </div>
+      )}
 
       {/* System prompt */}
       <div className="mb-4">
@@ -173,13 +232,13 @@ export default function ChatPage() {
           value={userMessage}
           onChange={(e) => setUserMessage(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-          disabled={!baseUrl || streaming}
-          placeholder={baseUrl ? "Type a message..." : "Load a model first"}
+          disabled={!canSend}
+          placeholder={canSend ? "Type a message..." : selectedModel ? `Model status: ${selectedModelInfo?.status || 'unknown'}` : "Select a model"}
           className="flex-1 px-4 py-2 bg-gray-900 border border-gray-700 rounded-md text-white disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
         />
         <button
           onClick={sendMessage}
-          disabled={!baseUrl || streaming}
+          disabled={!canSend}
           className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 rounded-md font-medium"
         >
           {streaming ? 'Streaming...' : 'Send'}

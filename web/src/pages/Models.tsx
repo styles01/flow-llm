@@ -60,6 +60,17 @@ export default function ModelsPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['models'] }),
   })
 
+  // Connect external model
+  const [externalUrl, setExternalUrl] = useState('')
+  const connectMut = useMutation({
+    mutationFn: () => api.connectExternal(externalUrl),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['models'] })
+      queryClient.invalidateQueries({ queryKey: ['running'] })
+      setExternalUrl('')
+    },
+  })
+
   // Register local model
   const registerMut = useMutation({
     mutationFn: () => fetch('/api/register-local', {
@@ -90,7 +101,7 @@ export default function ModelsPage() {
       </div>
 
       {/* Register local model */}
-      <section className="mb-8 bg-gray-900 border border-gray-800 rounded-lg p-4">
+      <section className="mb-6 bg-gray-900 border border-gray-800 rounded-lg p-4">
         <h3 className="text-sm font-semibold text-gray-300 mb-3">Register Existing Model</h3>
         <p className="text-xs text-gray-500 mb-3">
           Already have a GGUF file on disk? Register it here (e.g. your external SSD models).
@@ -118,6 +129,38 @@ export default function ModelsPage() {
             Register
           </button>
         </div>
+      </section>
+
+      {/* Connect running model */}
+      <section className="mb-6 bg-gray-900 border border-green-900/40 rounded-lg p-4">
+        <h3 className="text-sm font-semibold text-green-300 mb-3">Connect Running Model</h3>
+        <p className="text-xs text-gray-500 mb-3">
+          Already have a llama-server or MLX backend running? Connect JAMES to it without restarting.
+        </p>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={externalUrl}
+            onChange={e => setExternalUrl(e.target.value)}
+            placeholder="http://127.0.0.1:8081"
+            className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-green-500"
+          />
+          <button
+            onClick={() => connectMut.mutate()}
+            disabled={!externalUrl.trim() || connectMut.isPending}
+            className="px-4 py-2 bg-green-600 hover:bg-green-500 disabled:bg-gray-700 disabled:text-gray-500 rounded-md text-sm font-medium"
+          >
+            {connectMut.isPending ? 'Connecting...' : 'Connect'}
+          </button>
+        </div>
+        {connectMut.isError && (
+          <p className="text-red-400 text-xs mt-2">{(connectMut.error as Error).message}</p>
+        )}
+        {connectMut.data && (
+          <p className="text-green-400 text-xs mt-2">
+            Connected! Model <span className="font-mono">{connectMut.data.model_id}</span> on port {connectMut.data.port}
+          </p>
+        )}
       </section>
 
       {/* Local models */}

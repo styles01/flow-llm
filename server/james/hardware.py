@@ -22,10 +22,10 @@ class HardwareInfo:
 
     @property
     def recommended_max_model_gb(self) -> float:
-        """Maximum model size that fits in available memory with headroom."""
-        # Leave 8GB for system, 20% headroom for KV cache and context
+        """Maximum model size that fits in memory with headroom."""
+        # Leave 8GB for system, 20% of total for KV cache and context
         headroom = max(8, self.memory_total_gb * 0.2)
-        return self.memory_available_gb - headroom
+        return round(self.memory_total_gb - headroom, 1)
 
 
 def get_hardware_info() -> HardwareInfo:

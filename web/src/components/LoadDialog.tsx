@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api, type ModelInfo, type HFSearchResult, type GGUFFile } from '../api/client'
+import { api, type ModelInfo } from '../api/client'
 
 interface LoadDialogProps {
   model: ModelInfo
@@ -9,12 +9,16 @@ interface LoadDialogProps {
 
 export function LoadDialog({ model, onClose }: LoadDialogProps) {
   const queryClient = useQueryClient()
-  const [ctxSize, setCtxSize] = useState(100000)
-  const [flashAttn, setFlashAttn] = useState('on')
-  const [cacheTypeK, setCacheTypeK] = useState('q4_0')
-  const [cacheTypeV, setCacheTypeV] = useState('q4_0')
-  const [gpuLayers, setGpuLayers] = useState(-1)
-  const [nParallel, setNParallel] = useState(2)
+
+  // Fetch saved defaults
+  const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: () => api.getSettings() })
+
+  const [ctxSize, setCtxSize] = useState(settings?.default_ctx_size ?? 100000)
+  const [flashAttn, setFlashAttn] = useState(settings?.default_flash_attn ?? 'on')
+  const [cacheTypeK, setCacheTypeK] = useState(settings?.default_cache_type_k ?? 'q4_0')
+  const [cacheTypeV, setCacheTypeV] = useState(settings?.default_cache_type_v ?? 'q4_0')
+  const [gpuLayers, setGpuLayers] = useState(settings?.default_gpu_layers ?? -1)
+  const [nParallel, setNParallel] = useState(settings?.default_n_parallel ?? 2)
 
   const loadMut = useMutation({
     mutationFn: () => api.loadModel(model.id, {

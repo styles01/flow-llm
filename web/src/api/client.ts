@@ -86,6 +86,15 @@ export interface TelemetryRecord {
   error: string | null;
 }
 
+export interface AppSettings {
+  default_ctx_size: number
+  default_flash_attn: string
+  default_cache_type_k: string
+  default_cache_type_v: string
+  default_gpu_layers: number
+  default_n_parallel: number
+}
+
 export const api = {
   // Hardware
   getHardware: () => fetchAPI<HardwareInfo>('/hardware'),
@@ -119,6 +128,14 @@ export const api = {
   // Health
   getHealth: () => fetchAPI<{ status: string; running_models: number }>('/health'),
 
+  // Settings
+  getSettings: () => fetchAPI<AppSettings>('/settings'),
+  updateSettings: (s: Partial<AppSettings>) =>
+    fetchAPI<{ status: string }>('/settings', {
+      method: 'PUT',
+      body: JSON.stringify(s),
+    }),
+
   // Scan local models
   scanLocal: () => fetchAPI<{ found: any[]; total: number }>('/models/scan', { method: 'POST' }),
 
@@ -127,6 +144,13 @@ export const api = {
     fetchAPI<{ model_id: string; name: string; size_gb: number }>('/register-local', {
       method: 'POST',
       body: JSON.stringify({ gguf_path: ggufPath, name }),
+    }),
+
+  // Connect external backend
+  connectExternal: (baseUrl: string, modelId?: string) =>
+    fetchAPI<{ model_id: string; status: string; port: number; base_url: string; external: boolean }>('/connect-external', {
+      method: 'POST',
+      body: JSON.stringify({ base_url: baseUrl, model_id: modelId }),
     }),
 
   // Download progress

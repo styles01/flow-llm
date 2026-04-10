@@ -65,6 +65,101 @@ class SearchRequest(BaseModel):
 # --- Lifespan ---
 
 
+async def _auto_detect_backends():
+    """Scan common ports for already-running llama-server or mlx-openai-server instances
+    and auto-connect them to JAMES."""
+    import httpx
+
+    # Check the llama.cpp port range and the common manual port (8081)
+    ports_to_check = list(set([8081] + list(range(settings.llamacpp_port_range[0], settings.llamacpp_port_range[1] + 1))))
+
+    print(f"[JAMES] Auto-detecting backends on ports: {ports_to_check}")
+    connected = []
+    for port in ports_to_check:
+        # Skip our own server port
+        if port == settings.port:
+            continue
+
+        url = f"http://127.0.0.1:{port}"
+        try:
+            r = httpx.get(f"{url}/v1/models", timeout=2)
+            if r.status_code != 200:
+                continue
+
+            data = r.json()
+            if not data.get("data"):
+                continue
+
+            model_name = data["data"][0]["id"]
+            # Use the stem (without .gguf) as the canonical ID to match the database
+            if model_name.endswith(".gguf"):
+                stem = model_name[:-5]  # strip .gguf
+            else:
+                stem = model_name
+
+            print(f"[JAMES] Auto-detected backend on port {port}: {model_name} (stem: {stem})")
+            logger.info(f"Auto-detected backend on port {port}: {model_name} (stem: {stem})")
+
+            # Check if already tracked (by either name)
+            if process_manager.get_process(model_name) or process_manager.get_process(stem):
+                print(f"[JAMES] Already tracked, skipping: {stem}")
+                logger.info(f"Already tracked, skipping: {stem}")
+                continue
+
+            # Try to match with an existing database entry
+            session = db_session_factory()
+            db_id = stem  # default
+            try:
+                # Try exact match by ID
+                model = session.query(Model).filter(Model.id == stem).first()
+                if not model:
+                    # Try matching by .gguf filename (e.g. model_name in gguf_file column)
+                    model = session.query(Model).filter(Model.gguf_file.contains(model_name)).first()
+                if not model:
+                    # Try matching by name containing the stem
+                    model = session.query(Model).filter(Model.name.contains(stem)).first()
+
+                if model:
+                    # Use the existing database ID so frontend can reference it
+                    db_id = model.id
+                    model.status = "running"
+                    model.port = port
+                    model.pid = None  # external process, we don't track PID
+                    session.commit()
+                    print(f"[JAMES] Matched to DB model: {db_id}")
+                else:
+                    # Create a new DB entry for this detected model
+                    model = Model(
+                        id=stem,
+                        name=model_name,
+                        backend="gguf",
+                        status="running",
+                        port=port,
+                    )
+                    session.add(model)
+                    session.commit()
+                    print(f"[JAMES] Created new DB entry for: {stem}")
+            finally:
+                session.close()
+
+            # Register with process manager using the DB ID
+            process_manager.register_external(
+                model_id=db_id,
+                backend="gguf",
+                base_url=url,
+                port=port,
+            )
+            print(f"[JAMES] Registered external backend: {db_id} on port {port}")
+            logger.info(f"Registered external backend: {db_id} on port {port}")
+
+            connected.append(f"{db_id} on :{port}")
+        except Exception:
+            continue
+
+    if connected:
+        logger.info(f"Auto-detected running backends: {', '.join(connected)}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
@@ -74,6 +169,24 @@ async def lifespan(app: FastAPI):
     settings.ensure_dirs()
     db_session_factory = init_db(settings.db_path)
     hf_client = HuggingFaceClient(token=None)  # TODO: load from config
+
+    # Reset any stale "running" statuses from previous sessions
+    session = db_session_factory()
+    try:
+        stale = session.query(Model).filter(Model.status == "running").all()
+        for m in stale:
+            m.status = "available"
+            m.port = None
+            m.pid = None
+        session.commit()
+        if stale:
+            logger.info(f"Reset {len(stale)} stale running model(s) to available")
+    finally:
+        session.close()
+
+    # Auto-detect running backends on common ports
+    await _auto_detect_backends()
+
     logger.info("JAMES started — data dir: %s", settings.data_dir)
 
     yield
@@ -177,6 +290,40 @@ async def list_models():
         ]
     finally:
         session.close()
+
+
+@app.get("/api/models/running")
+async def list_running_models():
+    """List all currently running models with live status."""
+    processes = process_manager.get_all_processes()
+    hw = get_hardware_info()
+
+    result = []
+    session = db_session_factory()
+    try:
+        for model_id, proc in processes.items():
+            model = session.query(Model).filter(Model.id == model_id).first()
+            result.append({
+                "model_id": model_id,
+                "name": model.name if model else model_id,
+                "backend": proc.backend,
+                "port": proc.port,
+                "base_url": proc.base_url + "/v1",
+                "pid": proc.get_pid(),
+                "is_running": proc.is_running(),
+            })
+    finally:
+        session.close()
+
+    return {
+        "models": result,
+        "hardware": {
+            "chip": hw.chip,
+            "memory_total_gb": hw.memory_total_gb,
+            "memory_available_gb": hw.memory_available_gb,
+            "memory_used_gb": hw.memory_used_gb,
+        },
+    }
 
 
 @app.get("/api/models/{model_id}")
@@ -442,6 +589,91 @@ async def register_local_model(request: RegisterLocalRequest):
         session.close()
 
 
+class ConnectExternalRequest(BaseModel):
+    model_config = {"protected_namespaces": ()}
+    model_id: Optional[str] = None  # If None, auto-detect from the backend
+    base_url: str  # e.g. "http://127.0.0.1:8081"
+    backend: str = "gguf"
+
+
+@app.post("/api/connect-external")
+async def connect_external_model(request: ConnectExternalRequest):
+    """Connect JAMES to an already-running backend (e.g. llama-server started manually).
+
+    This lets you use models that are already loaded without restarting them.
+    JAMES will proxy requests to the external backend and track it as a running model.
+    """
+    import httpx
+
+    base_url = request.base_url.rstrip("/")
+    port = int(base_url.split(":")[-1])
+
+    # Verify the backend is actually running
+    try:
+        r = httpx.get(f"{base_url}/v1/models", timeout=5)
+        if r.status_code != 200:
+            raise HTTPException(400, f"Backend at {base_url} returned status {r.status_code}")
+    except httpx.ConnectError:
+        raise HTTPException(400, f"Cannot connect to backend at {base_url}")
+
+    # Auto-detect model name from the backend
+    model_id = request.model_id
+    if not model_id:
+        try:
+            data = r.json()
+            if data.get("data"):
+                model_id = data["data"][0]["id"]
+            else:
+                raise HTTPException(400, "Cannot auto-detect model name. Provide model_id.")
+        except Exception:
+            raise HTTPException(400, "Cannot auto-detect model name. Provide model_id.")
+
+    # Check if model exists in registry — try exact match, then by stem (without .gguf)
+    session = db_session_factory()
+    try:
+        model = session.query(Model).filter(Model.id == model_id).first()
+        if not model:
+            # Try matching without the .gguf extension (llama-server includes it, we strip it)
+            stem_id = model_id.replace(".gguf", "")
+            model = session.query(Model).filter(Model.id == stem_id).first()
+            if model:
+                model_id = stem_id  # Use the existing registered ID
+
+        if not model:
+            model = Model(
+                id=model_id,
+                name=model_id,
+                backend=request.backend,
+                status="running",
+                port=port,
+            )
+            session.add(model)
+        else:
+            model.status = "running"
+            model.port = port
+        session.commit()
+    finally:
+        session.close()
+
+    # Register with process manager as external
+    process_manager.register_external(
+        model_id=model_id,
+        backend=request.backend,
+        base_url=base_url,
+        port=port,
+    )
+
+    await broadcast("model_loaded", {"model_id": model_id, "port": port})
+
+    return {
+        "model_id": model_id,
+        "status": "running",
+        "port": port,
+        "base_url": f"{base_url}/v1",
+        "external": True,
+    }
+
+
 # --- Management API: Model Loading ---
 
 
@@ -518,7 +750,8 @@ async def load_model(model_id: str, request: ModelLoadRequest):
 
 @app.post("/api/models/{model_id}/unload")
 async def unload_model(model_id: str):
-    """Unload a model (stop its backend process)."""
+    """Unload a model (stop its backend process, freeing memory)."""
+    print(f"[JAMES] unload_model('{model_id}') called")
     session = db_session_factory()
     try:
         model = session.query(Model).filter(Model.id == model_id).first()
@@ -527,7 +760,23 @@ async def unload_model(model_id: str):
         if model.status != "running":
             raise HTTPException(400, f"Model {model_id} is not running")
 
-        await process_manager.stop_model(model_id)
+        port = model.port  # Save port before clearing status
+        print(f"[JAMES] Model {model_id} is running on port {port}")
+        logger.info(f"Unloading model {model_id} on port {port}")
+
+        # Try stopping by model_id first, then try with .gguf suffix
+        stopped = await process_manager.stop_model(model_id)
+        print(f"[JAMES] stop_model('{model_id}') = {stopped}")
+        if not stopped:
+            stopped = await process_manager.stop_model(model_id + ".gguf")
+            print(f"[JAMES] stop_model('{model_id}.gguf') = {stopped}")
+
+        # If process_manager doesn't know about it, kill whatever is on that port
+        if not stopped and port:
+            print(f"[JAMES] Model not in process manager, killing port {port} directly")
+            logger.info(f"Model not in process manager, killing port {port} directly")
+            stopped = await process_manager._kill_port(port)
+            print(f"[JAMES] _kill_port({port}) = {stopped}")
 
         model.status = "available"
         model.port = None
@@ -536,43 +785,9 @@ async def unload_model(model_id: str):
 
         await broadcast("model_unloaded", {"model_id": model_id})
 
-        return {"model_id": model_id, "status": "available"}
+        return {"model_id": model_id, "status": "available", "killed": stopped}
     finally:
         session.close()
-
-
-@app.get("/api/models/running")
-async def list_running_models():
-    """List all currently running models with live status."""
-    processes = process_manager.get_all_processes()
-    hw = get_hardware_info()
-
-    result = []
-    session = db_session_factory()
-    try:
-        for model_id, proc in processes.items():
-            model = session.query(Model).filter(Model.id == model_id).first()
-            result.append({
-                "model_id": model_id,
-                "name": model.name if model else model_id,
-                "backend": proc.backend,
-                "port": proc.port,
-                "base_url": proc.base_url + "/v1",
-                "pid": proc.get_pid(),
-                "is_running": proc.is_running(),
-            })
-    finally:
-        session.close()
-
-    return {
-        "models": result,
-        "hardware": {
-            "chip": hw.chip,
-            "memory_total_gb": hw.memory_total_gb,
-            "memory_available_gb": hw.memory_available_gb,
-            "memory_used_gb": hw.memory_used_gb,
-        },
-    }
 
 
 # --- Management API: HuggingFace Search ---
@@ -662,13 +877,13 @@ async def chat_completions(request: dict):
     start_time = time.monotonic()
     backend_url = proc.base_url
 
-    async with httpx.AsyncClient(timeout=300.0) as client:
-        if request.get("stream", False):
-            # Streaming response — collect telemetry while streaming
-            async def stream_with_metrics():
-                first_token_time = None
-                total_output_tokens = 0
-
+    if request.get("stream", False):
+        # Streaming response — client must outlive the generator
+        async def stream_with_metrics():
+            first_token_time = None
+            total_output_tokens = 0
+            client = httpx.AsyncClient(timeout=300.0)
+            try:
                 async with client.stream(
                     "POST",
                     f"{backend_url}/v1/chat/completions",
@@ -679,7 +894,7 @@ async def chat_completions(request: dict):
                         if line.startswith("data: "):
                             data = line[6:]
                             if data == "[DONE]":
-                                yield line + "\n\n"
+                                yield "data: [DONE]\n\n"
                                 break
                             try:
                                 import json
@@ -690,24 +905,31 @@ async def chat_completions(request: dict):
                                     total_output_tokens += 1
                             except Exception:
                                 pass
-                        yield line + "\n\n"
+                            yield line + "\n"
+                        elif line.strip() == "":
+                            yield "\n"
+                        else:
+                            yield line + "\n"
+            finally:
+                await client.aclose()
 
-                # Record telemetry
-                ttft_ms = (first_token_time - start_time) * 1000 if first_token_time else None
-                await _record_telemetry(
-                    model_id=model_name,
-                    backend=proc.backend,
-                    ttft_ms=ttft_ms,
-                    input_tokens=request.get("max_tokens"),
-                    output_tokens=total_output_tokens if total_output_tokens else None,
-                )
-
-            return StreamingResponse(
-                stream_with_metrics(),
-                media_type="text/event-stream",
+            # Record telemetry
+            ttft_ms = (first_token_time - start_time) * 1000 if first_token_time else None
+            await _record_telemetry(
+                model_id=model_name,
+                backend=proc.backend,
+                ttft_ms=ttft_ms,
+                input_tokens=request.get("max_tokens"),
+                output_tokens=total_output_tokens if total_output_tokens else None,
             )
-        else:
-            # Non-streaming response
+
+        return StreamingResponse(
+            stream_with_metrics(),
+            media_type="text/event-stream",
+        )
+    else:
+        # Non-streaming response
+        async with httpx.AsyncClient(timeout=300.0) as client:
             response = await client.post(
                 f"{backend_url}/v1/chat/completions",
                 json=request,
@@ -789,6 +1011,46 @@ async def _record_telemetry(
 # --- Health ---
 
 
+class UpdateSettingsRequest(BaseModel):
+    default_ctx_size: Optional[int] = None
+    default_flash_attn: Optional[str] = None
+    default_cache_type_k: Optional[str] = None
+    default_cache_type_v: Optional[str] = None
+    default_gpu_layers: Optional[int] = None
+    default_n_parallel: Optional[int] = None
+
+
+@app.get("/api/settings")
+async def get_settings():
+    """Get current default settings for model loading."""
+    return {
+        "default_ctx_size": settings.default_ctx_size,
+        "default_flash_attn": settings.default_flash_attn,
+        "default_cache_type_k": settings.default_cache_type_k,
+        "default_cache_type_v": settings.default_cache_type_v,
+        "default_gpu_layers": settings.default_gpu_layers,
+        "default_n_parallel": settings.default_n_parallel,
+    }
+
+
+@app.put("/api/settings")
+async def update_settings(request: UpdateSettingsRequest):
+    """Update default settings for model loading."""
+    if request.default_ctx_size is not None:
+        settings.default_ctx_size = request.default_ctx_size
+    if request.default_flash_attn is not None:
+        settings.default_flash_attn = request.default_flash_attn
+    if request.default_cache_type_k is not None:
+        settings.default_cache_type_k = request.default_cache_type_k
+    if request.default_cache_type_v is not None:
+        settings.default_cache_type_v = request.default_cache_type_v
+    if request.default_gpu_layers is not None:
+        settings.default_gpu_layers = request.default_gpu_layers
+    if request.default_n_parallel is not None:
+        settings.default_n_parallel = request.default_n_parallel
+    return {"status": "ok"}
+
+
 @app.get("/api/health")
 async def health():
     """Health check endpoint."""
@@ -826,7 +1088,7 @@ def main():
         "james.main:app",
         host=settings.host,
         port=settings.port,
-        reload=True,
+        reload=False,
         log_level="info",
     )
 

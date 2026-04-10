@@ -136,11 +136,41 @@ class BackendProcess:
 
 
 
+class ExternalProcess:
+    """Represents an already-running backend not started by JAMES."""
+
+    def __init__(self, model_id: str, backend: str, base_url: str, port: int):
+        self.model_id = model_id
+        self.backend = backend
+        self.base_url = base_url
+        self.port = port
+        self._external = True
+
+    def is_running(self) -> bool:
+        """Check if the external backend is still alive."""
+        import httpx
+        try:
+            r = httpx.get(f"{self.base_url}/health", timeout=3)
+            return r.status_code == 200
+        except Exception:
+            # Try /v1/models as fallback
+            try:
+                r = httpx.get(f"{self.base_url}/v1/models", timeout=3)
+                return r.status_code == 200
+            except Exception:
+                return False
+
+    def get_pid(self) -> Optional[int]:
+        """External processes don't have a managed PID."""
+        return None
+
+
 class ProcessManager:
     """Manages all backend processes."""
 
     def __init__(self):
         self._processes: dict[str, BackendProcess] = {}  # model_id -> BackendProcess
+        self._external: dict[str, ExternalProcess] = {}  # model_id -> ExternalProcess
         self._port_alloc: dict[int, str] = {}  # port -> model_id
 
     def _allocate_port(self, backend: str) -> int:
@@ -204,8 +234,31 @@ class ProcessManager:
         return proc
 
     async def stop_model(self, model_id: str) -> bool:
-        """Stop a running model."""
+        """Stop a running model. For managed processes, kills the subprocess.
+        For external processes, kills whatever is listening on that port."""
+        print(f"[JAMES] stop_model('{model_id}') — external={list(self._external.keys())} processes={list(self._processes.keys())}")
+        logger.info(f"stop_model called for {model_id}, external={list(self._external.keys())}, processes={list(self._processes.keys())}")
+
+        # External process — find and kill the process on that port
+        if model_id in self._external:
+            ext = self._external[model_id]
+            port = ext.port
+            del self._external[model_id]
+            print(f"[JAMES] Killing external backend on port {port}")
+            logger.info(f"Unregistering external backend: model={model_id} port={port}")
+
+            # Kill the process listening on that port
+            killed = await self._kill_port(port)
+            if killed:
+                print(f"[JAMES] Successfully killed process on port {port}")
+                logger.info(f"Killed process on port {port}")
+            else:
+                print(f"[JAMES] WARNING: No process found on port {port} to kill")
+                logger.warning(f"No process found on port {port} to kill")
+            return True
+
         if model_id not in self._processes:
+            print(f"[JAMES] Model '{model_id}' not found in any process list")
             return False
 
         proc = self._processes[model_id]
@@ -214,18 +267,95 @@ class ProcessManager:
         del self._processes[model_id]
         return success
 
-    def get_process(self, model_id: str) -> Optional[BackendProcess]:
+    def register_external(self, model_id: str, backend: str, base_url: str, port: int) -> ExternalProcess:
+        """Register an already-running backend process not started by JAMES."""
+        ext = ExternalProcess(model_id=model_id, backend=backend, base_url=base_url, port=port)
+        self._external[model_id] = ext
+        logger.info(f"Registered external backend: model={model_id} base_url={base_url}")
+        return ext
+
+    def get_process(self, model_id: str) -> Optional[BackendProcess | ExternalProcess]:
         """Get the process for a model."""
+        if model_id in self._external:
+            return self._external[model_id]
         return self._processes.get(model_id)
 
-    def get_all_processes(self) -> dict[str, BackendProcess]:
-        """Get all running processes."""
-        return {k: v for k, v in self._processes.items() if v.is_running()}
+    def get_all_processes(self) -> dict[str, BackendProcess | ExternalProcess]:
+        """Get all running processes (managed + external)."""
+        result = {}
+        result.update({k: v for k, v in self._processes.items() if v.is_running()})
+        result.update({k: v for k, v in self._external.items() if v.is_running()})
+        return result
+
 
     async def stop_all(self):
         """Stop all running backends."""
         for model_id in list(self._processes.keys()):
             await self.stop_model(model_id)
+        for model_id in list(self._external.keys()):
+            await self.stop_model(model_id)
+
+    async def _kill_port(self, port: int) -> bool:
+        """Kill whatever process is listening on the given port."""
+        import asyncio
+        try:
+            # Find PID listening on this port
+            result = await asyncio.create_subprocess_exec(
+                "lsof", "-ti", f":{port}", "-sTCP:LISTEN",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await result.communicate()
+            pids = stdout.decode().strip().split('\n')
+            pids = [p.strip() for p in pids if p.strip()]
+
+            print(f"[JAMES] _kill_port({port}): found PIDs={pids}")
+
+            if not pids:
+                return False
+
+            # First try SIGTERM (graceful)
+            for pid in pids:
+                try:
+                    await asyncio.create_subprocess_exec("kill", pid)
+                    logger.info(f"Sent SIGTERM to PID {pid} on port {port}")
+                except Exception as e:
+                    logger.error(f"Failed to kill PID {pid}: {e}")
+
+            # Wait and check if it died
+            await asyncio.sleep(2)
+            check = await asyncio.create_subprocess_exec(
+                "lsof", "-ti", f":{port}", "-sTCP:LISTEN",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await check.communicate()
+            remaining = stdout.decode().strip().split('\n')
+            remaining = [p.strip() for p in remaining if p.strip()]
+
+            # Escalate to SIGKILL if still alive
+            if remaining:
+                for pid in remaining:
+                    try:
+                        await asyncio.create_subprocess_exec("kill", "-9", pid)
+                        logger.info(f"Sent SIGKILL to PID {pid} on port {port}")
+                    except Exception as e:
+                        logger.error(f"Failed to kill -9 PID {pid}: {e}")
+
+                await asyncio.sleep(2)
+                # Final check
+                check2 = await asyncio.create_subprocess_exec(
+                    "lsof", "-ti", f":{port}", "-sTCP:LISTEN",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, _ = await check2.communicate()
+                return not stdout.decode().strip()
+
+            return True
+        except Exception as e:
+            logger.error(f"Error killing port {port}: {e}")
+            return False
 
 
 # Global process manager
