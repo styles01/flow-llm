@@ -319,6 +319,129 @@ async def delete_model(model_id: str):
         session.close()
 
 
+@app.post("/api/models/scan")
+async def scan_local_models():
+    """Scan the models directory for GGUF/MLX files not yet in the registry.
+
+    This finds models that were downloaded manually (e.g., via gemma4.sh)
+    and registers them in the database.
+    """
+    from james.config import settings
+    session = db_session_factory()
+    found = []
+
+    try:
+        models_dir = settings.models_dir
+        if not models_dir.exists():
+            return {"found": [], "message": f"Models directory not found: {models_dir}"}
+
+        # Walk the models directory for GGUF files
+        for gguf_path in models_dir.rglob("*.gguf"):
+            model_id = gguf_path.stem  # filename without extension
+            # Check if already registered
+            existing = session.query(Model).filter(Model.gguf_file == str(gguf_path)).first()
+            if existing:
+                continue
+
+            # Get file size
+            size_gb = round(gguf_path.stat().st_size / (1024**3), 2)
+
+            # Validate template (GGUF files have templates embedded)
+            from james.template_validator import validate_model_dir
+            validation = validate_model_dir(gguf_path.parent)
+
+            model = Model(
+                id=model_id,
+                name=gguf_path.name,
+                hf_id=None,
+                backend="gguf",
+                gguf_file=str(gguf_path),
+                mlx_path=None,
+                quantization=HuggingFaceClient._extract_quant(gguf_path.name),
+                size_gb=size_gb,
+                template_valid=validation.valid,
+                supports_tools=validation.supports_tools,
+                status="available",
+            )
+            session.add(model)
+            found.append({
+                "id": model_id,
+                "name": gguf_path.name,
+                "backend": "gguf",
+                "size_gb": size_gb,
+                "path": str(gguf_path),
+            })
+
+        session.commit()
+        return {"found": found, "total": len(found)}
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(500, f"Scan failed: {e}")
+    finally:
+        session.close()
+
+
+@app.get("/api/downloads")
+async def get_downloads():
+    """Get status of all active and recent downloads."""
+    return HuggingFaceClient.get_all_downloads()
+
+
+class RegisterLocalRequest(BaseModel):
+    gguf_path: str
+    name: Optional[str] = None
+
+
+@app.post("/api/register-local")
+async def register_local_model(request: RegisterLocalRequest):
+    """Register a local GGUF file that's already on disk (e.g., downloaded manually).
+
+    This is for models like the one used in gemma4.sh that were downloaded
+    outside of JAMES.
+    """
+    path = Path(request.gguf_path)
+    if not path.exists():
+        raise HTTPException(404, f"File not found: {request.gguf_path}")
+    if not path.suffix == ".gguf":
+        raise HTTPException(400, "Only GGUF files can be registered this way")
+
+    session = db_session_factory()
+    try:
+        # Check if already registered
+        existing = session.query(Model).filter(Model.gguf_file == str(path)).first()
+        if existing:
+            return {"model_id": existing.id, "status": "already_registered"}
+
+        model_name = request.name or path.name
+        model_id = path.stem
+
+        # Validate template
+        from james.template_validator import validate_model_dir
+        validation = validate_model_dir(path.parent)
+
+        size_gb = round(path.stat().st_size / (1024**3), 2)
+
+        model = Model(
+            id=model_id,
+            name=model_name,
+            hf_id=None,
+            backend="gguf",
+            gguf_file=str(path),
+            mlx_path=None,
+            quantization=HuggingFaceClient._extract_quant(path.name),
+            size_gb=size_gb,
+            template_valid=validation.valid,
+            supports_tools=validation.supports_tools,
+            status="available",
+        )
+        session.add(model)
+        session.commit()
+
+        return {"model_id": model_id, "name": model_name, "size_gb": size_gb}
+    finally:
+        session.close()
+
+
 # --- Management API: Model Loading ---
 
 

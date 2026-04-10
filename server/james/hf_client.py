@@ -1,11 +1,11 @@
-"""HuggingFace Hub client — search and download models."""
+"""HuggingFace Hub client — search and download models with progress tracking."""
 
 import logging
 import os
 from pathlib import Path
 from typing import Optional
 
-from huggingface_hub import HfApi, hf_hub_download, scan_cache_dir
+from huggingface_hub import HfApi, hf_hub_download
 from huggingface_hub.constants import HF_HUB_CACHE
 
 logger = logging.getLogger(__name__)
@@ -26,6 +26,9 @@ QUANT_RANKINGS = [
     "IQ3_M",
     "IQ2_M",
 ]
+
+# Active downloads for progress tracking
+_active_downloads: dict[str, dict] = {}
 
 
 class HuggingFaceClient:
@@ -91,7 +94,6 @@ class HuggingFaceClient:
             gguf_files = []
             for s in model_info.siblings:
                 if s.rfilename.endswith(".gguf"):
-                    # Extract quantization from filename
                     quant = self._extract_quant(s.rfilename)
                     gguf_files.append({
                         "filename": s.rfilename,
@@ -100,7 +102,6 @@ class HuggingFaceClient:
                         "size_gb": round(s.size / (1024**3), 2) if s.size else None,
                     })
 
-            # Sort by quality (best first)
             gguf_files.sort(key=lambda f: self._quant_rank(f.get("quantization", "")))
             return gguf_files
         except Exception as e:
@@ -109,7 +110,6 @@ class HuggingFaceClient:
 
     def list_mlx_files(self, model_id: str) -> list[dict]:
         """Check if MLX versions exist (usually in mlx-community org)."""
-        # MLX models are usually in the mlx-community org
         base_name = model_id.split("/")[-1] if "/" in model_id else model_id
         mlx_id = f"mlx-community/{base_name}"
 
@@ -127,7 +127,6 @@ class HuggingFaceClient:
         model_id: str,
         filename: Optional[str] = None,
         local_dir: Optional[str] = None,
-        progress_callback=None,
     ) -> Path:
         """Download a model file from HuggingFace Hub.
 
@@ -136,8 +135,19 @@ class HuggingFaceClient:
 
         Returns the path to the downloaded file/directory.
         """
+        download_key = f"{model_id}/{filename}" if filename else model_id
+
+        # Track progress
+        _active_downloads[download_key] = {
+            "status": "downloading",
+            "model_id": model_id,
+            "filename": filename,
+            "progress": 0.0,
+        }
+
         if local_dir is None:
-            local_dir = str(Path.home() / ".james" / "models")
+            from james.config import settings
+            local_dir = str(settings.models_dir)
 
         # Ensure the download directory exists with the model name as subfolder
         model_name = model_id.replace("/", "__")
@@ -147,12 +157,15 @@ class HuggingFaceClient:
         try:
             if filename:
                 # Download a specific file (GGUF)
+                # huggingface_hub supports resume downloads
                 downloaded_path = hf_hub_download(
                     repo_id=model_id,
                     filename=filename,
                     local_dir=str(download_dir),
                     token=self.token,
                 )
+                _active_downloads[download_key]["progress"] = 100.0
+                _active_downloads[download_key]["status"] = "complete"
             else:
                 # Download the entire repo (MLX)
                 from huggingface_hub import snapshot_download
@@ -161,18 +174,42 @@ class HuggingFaceClient:
                     local_dir=str(download_dir),
                     token=self.token,
                 )
+                _active_downloads[download_key]["progress"] = 100.0
+                _active_downloads[download_key]["status"] = "complete"
 
             return Path(downloaded_path)
         except Exception as e:
+            _active_downloads[download_key]["status"] = "error"
+            _active_downloads[download_key]["error"] = str(e)
             logger.error(f"Download failed for {model_id}/{filename}: {e}")
             raise
+
+    @staticmethod
+    def get_download_progress(download_key: str) -> Optional[dict]:
+        """Get the progress of an active download."""
+        return _active_downloads.get(download_key)
+
+    @staticmethod
+    def get_all_downloads() -> dict[str, dict]:
+        """Get all active downloads."""
+        return dict(_active_downloads)
+
+    @staticmethod
+    def clear_completed_downloads():
+        """Remove completed/error downloads from tracking."""
+        to_remove = [k for k, v in _active_downloads.items() if v["status"] in ("complete", "error")]
+        for k in to_remove:
+            del _active_downloads[k]
 
     @staticmethod
     def _extract_quant(filename: str) -> str:
         """Extract quantization type from a GGUF filename."""
         import re
-        # Common patterns: Q4_K_M, Q8_0, IQ4_NL, etc.
-        match = re.search(r"(Q\d+_[A-Z]\d?_[A-Z]\d?|Q\d+_\d+|IQ\d+_[A-Z]\d?|F\d+|BF\d+|F16)", filename, re.IGNORECASE)
+        match = re.search(
+            r"(Q\d+_[A-Z]\d?_[A-Z]\d?|Q\d+_\d+|IQ\d+_[A-Z]\d?|F\d+|BF\d+|F16)",
+            filename,
+            re.IGNORECASE,
+        )
         if match:
             return match.group(1).upper()
         return "unknown"
@@ -184,4 +221,4 @@ class HuggingFaceClient:
         for i, q in enumerate(QUANT_RANKINGS):
             if q in quant_upper:
                 return i
-        return len(QUANT_RANKINGS)  # Unknown quants rank last
+        return len(QUANT_RANKINGS)

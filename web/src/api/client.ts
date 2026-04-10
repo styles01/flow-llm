@@ -118,4 +118,17 @@ export const api = {
 
   // Health
   getHealth: () => fetchAPI<{ status: string; running_models: number }>('/health'),
+
+  // Scan local models
+  scanLocal: () => fetchAPI<{ found: any[]; total: number }>('/models/scan', { method: 'POST' }),
+
+  // Register local GGUF
+  registerLocal: (ggufPath: string, name?: string) =>
+    fetchAPI<{ model_id: string; name: string; size_gb: number }>('/register-local', {
+      method: 'POST',
+      body: JSON.stringify({ gguf_path: ggufPath, name }),
+    }),
+
+  // Download progress
+  getDownloads: () => fetchAPI<Record<string, any>>('/downloads'),
 };

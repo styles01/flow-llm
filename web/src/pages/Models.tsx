@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api, type HFSearchResult, type GGUFFile } from '../api/client'
+import { api, type HFSearchResult, type GGUFFile, type ModelInfo } from '../api/client'
+import { LoadDialog } from '../components/LoadDialog'
 
 export default function ModelsPage() {
   const queryClient = useQueryClient()
@@ -8,6 +9,9 @@ export default function ModelsPage() {
   const [searchResults, setSearchResults] = useState<HFSearchResult[]>([])
   const [selectedModel, setSelectedModel] = useState<string | null>(null)
   const [downloading, setDownloading] = useState<string | null>(null)
+  const [loadDialogModel, setLoadDialogModel] = useState<ModelInfo | null>(null)
+  const [registerPath, setRegisterPath] = useState('')
+  const [registerName, setRegisterName] = useState('')
 
   // Local models
   const { data: models = [], isLoading: modelsLoading } = useQuery({
@@ -38,13 +42,6 @@ export default function ModelsPage() {
     },
   })
 
-  // Load model
-  const loadMut = useMutation({
-    mutationFn: ({ id, ctxSize }: { id: string; ctxSize: number }) =>
-      api.loadModel(id, { ctx_size: ctxSize }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['models'] }),
-  })
-
   // Unload model
   const unloadMut = useMutation({
     mutationFn: (id: string) => api.unloadModel(id),
@@ -57,9 +54,71 @@ export default function ModelsPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['models'] }),
   })
 
+  // Scan local models
+  const scanMut = useMutation({
+    mutationFn: () => fetch('/api/models/scan', { method: 'POST' }).then(r => r.json()),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['models'] }),
+  })
+
+  // Register local model
+  const registerMut = useMutation({
+    mutationFn: () => fetch('/api/register-local', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gguf_path: registerPath, name: registerName || undefined }),
+    }).then(r => r.json()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['models'] })
+      setRegisterPath('')
+      setRegisterName('')
+    },
+  })
+
   return (
     <div className="p-6 max-w-6xl">
-      <h2 className="text-2xl font-bold mb-6">Models</h2>
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-2xl font-bold">Models</h2>
+        <div className="flex gap-2">
+          <button
+            onClick={() => scanMut.mutate()}
+            disabled={scanMut.isPending}
+            className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded-md text-sm"
+          >
+            {scanMut.isPending ? 'Scanning...' : 'Scan Local Files'}
+          </button>
+        </div>
+      </div>
+
+      {/* Register local model */}
+      <section className="mb-8 bg-gray-900 border border-gray-800 rounded-lg p-4">
+        <h3 className="text-sm font-semibold text-gray-300 mb-3">Register Existing Model</h3>
+        <p className="text-xs text-gray-500 mb-3">
+          Already have a GGUF file on disk? Register it here (e.g. your external SSD models).
+        </p>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={registerPath}
+            onChange={e => setRegisterPath(e.target.value)}
+            placeholder="/Volumes/James4TBSSD/llms/model-name/model-Q4_K_M.gguf"
+            className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+          <input
+            type="text"
+            value={registerName}
+            onChange={e => setRegisterName(e.target.value)}
+            placeholder="Display name (optional)"
+            className="w-48 px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+          <button
+            onClick={() => registerMut.mutate()}
+            disabled={!registerPath.trim()}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 rounded-md text-sm font-medium"
+          >
+            Register
+          </button>
+        </div>
+      </section>
 
       {/* Local models */}
       <section className="mb-8">
@@ -67,7 +126,10 @@ export default function ModelsPage() {
         {modelsLoading ? (
           <p className="text-gray-500">Loading...</p>
         ) : models.length === 0 ? (
-          <p className="text-gray-500">No models downloaded yet. Search HuggingFace to add models.</p>
+          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 text-center">
+            <p className="text-gray-400 mb-2">No models yet.</p>
+            <p className="text-gray-500 text-sm">Download from HuggingFace below or register a local GGUF file above.</p>
+          </div>
         ) : (
           <div className="space-y-2">
             {models.map((m) => (
@@ -75,22 +137,23 @@ export default function ModelsPage() {
                 key={m.id}
                 className="flex items-center justify-between bg-gray-900 border border-gray-800 rounded-lg p-4"
               >
-                <div className="flex-1">
-                  <p className="font-medium">{m.name}</p>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium truncate">{m.name}</p>
                   <div className="flex gap-3 text-sm text-gray-400 mt-1">
                     <span className={`px-1.5 py-0.5 rounded text-xs font-mono ${
                       m.backend === 'gguf' ? 'bg-blue-900/50 text-blue-300' : 'bg-purple-900/50 text-purple-300'
-                    }`}>{m.backend.toUpperCase()}</span>
+                    }`}>{m.backend?.toUpperCase()}</span>
                     {m.quantization && <span>{m.quantization}</span>}
                     {m.size_gb && <span>{m.size_gb} GB</span>}
                     {m.template_valid === false && <span className="text-red-400">template error</span>}
+                    {m.template_valid === true && <span className="text-green-400">template ok</span>}
                     {m.supports_tools && <span className="text-green-400">tools</span>}
                   </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 ml-4">
                   {m.status === 'running' ? (
                     <>
-                      <span className="px-3 py-1.5 bg-green-900/50 text-green-300 rounded-md text-sm">
+                      <span className="px-3 py-1.5 bg-green-900/50 text-green-300 rounded-md text-sm whitespace-nowrap">
                         Running :{m.port}
                       </span>
                       <button
@@ -102,7 +165,7 @@ export default function ModelsPage() {
                     </>
                   ) : m.status === 'available' ? (
                     <button
-                      onClick={() => loadMut.mutate({ id: m.id, ctxSize: 100000 })}
+                      onClick={() => setLoadDialogModel(m)}
                       className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded-md text-sm"
                     >
                       Load
@@ -149,7 +212,7 @@ export default function ModelsPage() {
         {searchHF.isPending && <p className="text-gray-500">Searching...</p>}
 
         {searchResults.length > 0 && (
-          <div className="space-y-2">
+          <div className="space-y-2 max-h-96 overflow-y-auto">
             {searchResults.map((r) => (
               <div
                 key={r.id}
@@ -185,29 +248,61 @@ export default function ModelsPage() {
             {hfDetails.gguf_files.length > 0 && (
               <div className="space-y-1">
                 <p className="text-sm font-medium text-gray-300 mb-2">GGUF Files:</p>
-                {hfDetails.gguf_files.map((f: GGUFFile) => (
-                  <div key={f.filename} className="flex items-center justify-between py-1.5 px-3 bg-gray-800 rounded">
-                    <div className="text-sm">
-                      <span className="font-mono">{f.filename}</span>
-                      {f.size_gb && <span className="ml-2 text-gray-500">{f.size_gb} GB</span>}
+                <div className="max-h-48 overflow-y-auto">
+                  {hfDetails.gguf_files.map((f: GGUFFile) => (
+                    <div key={f.filename} className="flex items-center justify-between py-1.5 px-3 bg-gray-800 rounded mb-1">
+                      <div className="text-sm min-w-0">
+                        <span className="font-mono text-xs truncate block">{f.filename}</span>
+                        {f.size_gb && <span className="text-gray-500 text-xs">{f.size_gb} GB</span>}
+                      </div>
+                      <button
+                        onClick={() => {
+                          setDownloading(f.filename)
+                          downloadMut.mutate({ hfId: selectedModel!, filename: f.filename })
+                        }}
+                        disabled={downloading === f.filename}
+                        className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 rounded text-xs font-medium ml-3 whitespace-nowrap"
+                      >
+                        {downloading === f.filename ? 'Downloading...' : 'Download'}
+                      </button>
                     </div>
-                    <button
-                      onClick={() => {
-                        setDownloading(f.filename)
-                        downloadMut.mutate({ hfId: selectedModel!, filename: f.filename })
-                      }}
-                      disabled={downloading === f.filename}
-                      className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 rounded text-xs font-medium"
-                    >
-                      {downloading === f.filename ? 'Downloading...' : 'Download'}
-                    </button>
-                  </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {hfDetails.mlx_versions.length > 0 && (
+              <div className="mt-3">
+                <p className="text-sm font-medium text-gray-300 mb-2">MLX Version:</p>
+                {hfDetails.mlx_versions.map((v: { mlx_id: string; available: boolean }) => (
+                  <button
+                    key={v.mlx_id}
+                    onClick={() => {
+                      setDownloading(v.mlx_id)
+                      downloadMut.mutate({ hfId: v.mlx_id })
+                    }}
+                    disabled={downloading === v.mlx_id}
+                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-700 rounded text-sm font-medium"
+                  >
+                    {downloading === v.mlx_id ? 'Downloading...' : `Download ${v.mlx_id}`}
+                  </button>
                 ))}
               </div>
             )}
           </div>
         )}
       </section>
+
+      {/* Load dialog */}
+      {loadDialogModel && (
+        <LoadDialog
+          model={loadDialogModel}
+          onClose={() => {
+            setLoadDialogModel(null)
+            queryClient.invalidateQueries({ queryKey: ['models'] })
+          }}
+        />
+      )}
     </div>
   )
 }
