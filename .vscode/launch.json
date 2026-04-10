@@ -1,0 +1,44 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "JAMES: Backend + Frontend",
+      "type": "node",
+      "request": "launch",
+      "compounds": [
+        {
+          "name": "JAMES: Full Stack",
+          "configurations": ["Backend", "Frontend"],
+          "stopAll": true
+        }
+      ]
+    },
+    {
+      "name": "Backend",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "james.main",
+      "cwd": "${workspaceFolder}/server",
+      "env": {
+        "JAMES_DATA_DIR": "${workspaceFolder}/.james-data",
+        "JAMES_MODELS_DIR": "/Volumes/James4TBSSD/llms"
+      }
+    },
+    {
+      "name": "Frontend",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "${workspaceFolder}/web",
+      "console": "integratedTerminal"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "JAMES: Full Stack",
+      "configurations": ["Backend", "Frontend"],
+      "stopAll": true
+    }
+  ]
+}
