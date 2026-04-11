@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
+import { EmptyState } from '../components/EmptyState'
 
 export default function RunningPage() {
   const queryClient = useQueryClient()
@@ -74,7 +75,12 @@ export default function RunningPage() {
       {isLoading ? (
         <p className="text-gray-500">Loading...</p>
       ) : models.length === 0 ? (
-        <p className="text-gray-500">No models running. <Link to="/models" className="text-teal-400 hover:text-white underline">Go to Models</Link></p>
+        <EmptyState
+          title="No models running"
+          description="Load a model to get started."
+          illustration="instances"
+          action={{ label: 'Go to Models', linkTo: '/models' }}
+        />
       ) : (
         <div className="space-y-3">
           {models.map((m) => (

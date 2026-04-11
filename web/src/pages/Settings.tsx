@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
+import { formatError } from '../utils/errors'
 
 export default function SettingsPage() {
   const queryClient = useQueryClient()
@@ -189,7 +190,7 @@ export default function SettingsPage() {
               {saveMut.isPending ? 'Saving...' : 'Save Defaults'}
             </button>
             {saved && <span className="text-green-400 text-sm">Saved!</span>}
-            {saveMut.isError && <span className="text-red-400 text-sm">Error: {(saveMut.error as Error).message}</span>}
+            {saveMut.isError && <span className="text-red-400 text-sm">Error: {formatError(saveMut.error)}</span>}
           </div>
         </div>
       </section>

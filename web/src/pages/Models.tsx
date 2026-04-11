@@ -3,6 +3,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, type HFSearchResult, type GGUFFile, type ModelInfo } from '../api/client'
 import { LoadDialog } from '../components/LoadDialog'
 import { ConfirmationDialog } from '../components/ConfirmationDialog'
+import { EmptyState } from '../components/EmptyState'
+import { useToast } from '../components/Toast'
+import { formatError } from '../utils/errors'
 
 function formatSize(bytes: number | null, gb: number | null): string {
   if (gb && gb >= 1) return `${gb} GB`
@@ -12,6 +15,7 @@ function formatSize(bytes: number | null, gb: number | null): string {
 
 export default function ModelsPage() {
   const queryClient = useQueryClient()
+  const toast = useToast()
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<HFSearchResult[]>([])
   const [selectedModel, setSelectedModel] = useState<string | null>(null)
@@ -73,7 +77,15 @@ export default function ModelsPage() {
   // Scan local models
   const scanMut = useMutation({
     mutationFn: () => fetch('/api/models/scan', { method: 'POST' }).then(r => r.json()),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['models'] }),
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ['models'] })
+      const found = data?.found?.length ?? 0
+      if (found > 0) {
+        toast.success(`Found ${found} new model${found > 1 ? 's' : ''}`)
+      } else {
+        toast.info('No new models found')
+      }
+    },
   })
 
   // Connect external model
@@ -197,7 +209,7 @@ export default function ModelsPage() {
               </button>
             </div>
             {connectMut.isError && (
-              <p className="text-red-400 text-xs mt-2">{(connectMut.error as Error).message}</p>
+              <p className="text-red-400 text-xs mt-2">{formatError(connectMut.error)}</p>
             )}
             {connectMut.data && (
               <p className="text-green-400 text-xs mt-2">
@@ -214,10 +226,11 @@ export default function ModelsPage() {
         {modelsLoading ? (
           <p className="text-gray-400">Loading...</p>
         ) : models.length === 0 ? (
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 text-center">
-            <p className="text-gray-400 mb-2">No models yet.</p>
-            <p className="text-gray-400 text-sm">Download from HuggingFace below or register a local GGUF file above.</p>
-          </div>
+          <EmptyState
+            title="No models yet"
+            description="Download your first model from HuggingFace or register a local GGUF file."
+            illustration="models"
+          />
         ) : (
           <div className="space-y-2">
             {models.map((m) => (

@@ -7,6 +7,7 @@ import TelemetryPage from './pages/Telemetry'
 import SettingsPage from './pages/Settings'
 import { ToastProvider } from './components/Toast'
 import { Sidebar } from './components/Sidebar'
+import { ConnectionBanner } from './components/ConnectionBanner'
 
 const queryClient = new QueryClient()
 
@@ -20,6 +21,7 @@ function App() {
 
           {/* Main content */}
           <main className="flex-1 overflow-auto">
+            <ConnectionBanner />
             <Routes>
               <Route path="/" element={<ModelsPage />} />
               <Route path="/running" element={<RunningPage />} />

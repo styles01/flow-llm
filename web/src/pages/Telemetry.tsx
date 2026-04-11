@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { api, type TelemetryRecord } from '../api/client'
+import { EmptyState } from '../components/EmptyState'
 
 export default function TelemetryPage() {
   const { data, isLoading, refetch } = useQuery({
@@ -22,7 +23,11 @@ export default function TelemetryPage() {
       {isLoading ? (
         <p className="text-gray-400">Loading...</p>
       ) : records.length === 0 ? (
-        <p className="text-gray-400">No telemetry data yet. Send some requests through the proxy to see stats.</p>
+        <EmptyState
+          title="No telemetry data yet"
+          description="Send requests through the proxy to see stats."
+          illustration="telemetry"
+        />
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">

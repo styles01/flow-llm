@@ -1,8 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
-  <!-- Stepped/bitcrushed waveform - teal channel -->
-  <path d="M1 20 H4 V12 H6 V20 H8 V8 H10 V20 H12 V14 H14 V20 H16 V6 H18 V20 H20 V10 H22 V20 H24 V16 H26 V20 H28 V12 H31" fill="none" stroke="#2dd4bf" stroke-width="1.5" strokeMiterlimit="miter"/>
-  <!-- Stepped/bitcrushed waveform - magenta mirror -->
-  <path d="M1 24 H4 V18 H6 V24 H8 V16 H10 V24 H12 V20 H14 V24 H16 V14 H18 V24 H20 V18 H22 V24 H24 V22 H26 V24 H28 V20 H31" fill="none" stroke="#e879f9" stroke-width="1.5" strokeMiterlimit="miter" opacity="0.7"/>
-  <!-- Scanline -->
-  <line x1="1" y1="16" x2="31" y2="16" stroke="#5eead4" stroke-width="0.3" opacity="0.4"/>
+  <!-- Center axis -->
+  <line x1="1" y1="16" x2="31" y2="16" stroke="#5eead4" stroke-width="0.5" opacity="0.35"/>
+  <!-- Grid lines (oscilloscope) -->
+  <line x1="1" y1="8" x2="31" y2="8" stroke="#5eead4" stroke-width="0.2" opacity="0.1"/>
+  <line x1="1" y1="24" x2="31" y2="24" stroke="#5eead4" stroke-width="0.2" opacity="0.1"/>
+  <!-- Teal waveform — upper half, mirrored below -->
+  <path d="M1 10 H4 V16 H8 V6 H12 V16 H16 V12 H20 V16 H24 V8 H28 V16 H31" fill="none" stroke="#2dd4bf" stroke-width="1.5" strokeMiterlimit="miter"/>
+  <!-- Magenta waveform — mirror of teal, reflected across y=16 -->
+  <path d="M1 22 H4 V16 H8 V26 H12 V16 H16 V20 H20 V16 H24 V24 H28 V16 H31" fill="none" stroke="#e879f9" stroke-width="1.5" strokeMiterlimit="miter" opacity="0.8"/>
 </svg>

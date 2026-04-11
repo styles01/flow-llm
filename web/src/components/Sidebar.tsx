@@ -73,9 +73,15 @@ export function Sidebar() {
       <div className={`p-4 border-b border-gray-800 ${collapsed ? 'flex justify-center' : ''}`}>
         <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-2'}`}>
           <svg className={collapsed ? 'w-5 h-5' : 'w-7 h-7'} viewBox="0 0 32 32" fill="none">
-            <path d="M1 20 H4 V12 H6 V20 H8 V8 H10 V20 H12 V14 H14 V20 H16 V6 H18 V20 H20 V10 H22 V20 H24 V16 H26 V20 H28 V12 H31" stroke="#2dd4bf" strokeWidth="1.5" strokeMiterlimit="miter"/>
-            <path d="M1 24 H4 V18 H6 V24 H8 V16 H10 V24 H12 V20 H14 V24 H16 V14 H18 V24 H20 V18 H22 V24 H24 V22 H26 V24 H28 V20 H31" stroke="#e879f9" strokeWidth="1.5" strokeMiterlimit="miter" opacity="0.7"/>
-            <line x1="1" y1="16" x2="31" y2="16" stroke="#5eead4" strokeWidth="0.3" opacity="0.4"/>
+            {/* Grid lines */}
+            <line x1="1" y1="8" x2="31" y2="8" stroke="#5eead4" strokeWidth="0.15" opacity="0.15"/>
+            <line x1="1" y1="24" x2="31" y2="24" stroke="#5eead4" strokeWidth="0.15" opacity="0.15"/>
+            {/* Center axis */}
+            <line x1="1" y1="16" x2="31" y2="16" stroke="#5eead4" strokeWidth="0.5" opacity="0.35"/>
+            {/* Teal waveform — peaks above center */}
+            <path d="M1 16 H4 V10 H8 V16 H12 V12 H16 V16 H20 V8 H24 V16 H28 V14 H31" stroke="#2dd4bf" strokeWidth="1.5" strokeMiterlimit="miter"/>
+            {/* Magenta waveform — mirror below center */}
+            <path d="M1 16 H4 V22 H8 V16 H12 V20 H16 V16 H20 V24 H24 V16 H28 V18 H31" stroke="#e879f9" strokeWidth="1.5" strokeMiterlimit="miter" opacity="0.8"/>
           </svg>
           {!collapsed && (
             <div>

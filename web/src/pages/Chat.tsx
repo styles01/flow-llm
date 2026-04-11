@@ -1,14 +1,169 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '../api/client'
+import { api, type TelemetryRecord } from '../api/client'
+import { formatError } from '../utils/errors'
 
 interface Message {
   role: 'system' | 'user' | 'assistant'
   content: string
+  isError?: boolean
+}
+
+type ContentSegment =
+  | { type: 'thinking'; content: string }
+  | { type: 'text'; content: string }
+
+// Strip model control tokens that shouldn't be displayed
+function stripControlTokens(text: string): string {
+  // Remove self-closing control tokens like <|end|>, <|channel|>, <|eot_id|>, etc.
+  let cleaned = text.replace(/<\|[a-z_]+\|>/g, '')
+  // Remove <im_end>, <im_sep> and similar
+  cleaned = cleaned.replace(/<[a-z_]+>/g, (match) => {
+    // Keep HTML-like tags that are valid (thinking, etc. handled elsewhere)
+    if (match === '<thinking>' || match === '</thinking>') return match
+    return ''
+  })
+  // Remove any remaining special token markers
+  cleaned = cleaned.replace(/\[\/?INST\]/g, '')
+  cleaned = cleaned.replace(/<\|\/?([a-z_]+)\|>/g, (full, tag) => {
+    // Keep think tags (handled by thinking block parser)
+    if (tag === 'think' || tag === '/think') return full
+    return ''
+  })
+  return cleaned.trim()
+}
+
+function parseThinkingBlocks(content: string): ContentSegment[] {
+  const segments: ContentSegment[] = []
+  type Region = { start: number; end: number; content: string }
+  const regions: Region[] = []
+  let match: RegExpExecArray | null
+
+  // Gemma 4: <|think|>...<|/think|>
+  const re1 = /<\|think\|>([\s\S]*?)<\|\/think\|>/g
+  while ((match = re1.exec(content)) !== null) {
+    regions.push({ start: match.index, end: match.index + match[0].length, content: match[1].trim() })
+  }
+
+  // Claude-style: <thinking>...</thinking>
+  const re2 = /<thinking>([\s\S]*?)<\/thinking>/g
+  while ((match = re2.exec(content)) !== null) {
+    regions.push({ start: match.index, end: match.index + match[0].length, content: match[1].trim() })
+  }
+
+  // Qwen 3 / DeepSeek R1: <think>...</think>
+  const re3 = /<think>([\s\S]*?)<\/think>/g
+  while ((match = re3.exec(content)) !== null) {
+    regions.push({ start: match.index, end: match.index + match[0].length, content: match[1].trim() })
+  }
+
+  // Sort regions by start position
+  regions.sort((a, b) => a.start - b.start)
+
+  // Build segments from non-overlapping regions
+  let pos = 0
+  for (const region of regions) {
+    if (region.start < pos) continue // Skip overlapping
+    if (region.start > pos) {
+      const textContent = content.slice(pos, region.start).trim()
+      if (textContent) segments.push({ type: 'text', content: textContent })
+    }
+    segments.push({ type: 'thinking', content: region.content })
+    pos = region.end
+  }
+  if (pos < content.length) {
+    const textContent = content.slice(pos).trim()
+    if (textContent) segments.push({ type: 'text', content: textContent })
+  }
+
+  if (segments.length === 0) {
+    segments.push({ type: 'text', content })
+  }
+
+  return segments
+}
+
+function ThinkingBlock({ content }: { content: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const preview = content.length > 120 ? content.slice(0, 120) + '...' : content
+  return (
+    <details className="my-1">
+      <summary className="cursor-pointer text-xs text-gray-500 hover:text-gray-400 transition-colors select-none flex items-center gap-1">
+        <svg className="w-3 h-3 shrink-0 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+        <span className="italic">Thinking...</span>
+      </summary>
+      <div className="mt-1 pl-3 border-l-2 border-gray-700 text-xs text-gray-500 whitespace-pre-wrap leading-relaxed">
+        {expanded ? content : preview}
+        {content.length > 120 && (
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="ml-1 text-gray-400 hover:text-gray-300"
+          >
+            {expanded ? 'less' : 'more'}
+          </button>
+        )}
+      </div>
+    </details>
+  )
+}
+
+function MessageBubble({ message }: { message: Message }) {
+  if (message.role === 'system') return null
+
+  if (message.isError) {
+    return (
+      <div className="flex justify-start">
+        <div className="max-w-[80%] bg-red-900/30 border border-red-700/50 rounded-lg px-4 py-2.5 text-sm text-red-300">
+          {message.content}
+        </div>
+      </div>
+    )
+  }
+
+  if (message.role === 'user') {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[80%] bg-teal-700/40 border border-teal-600/30 rounded-lg px-4 py-2.5 text-sm text-teal-100 whitespace-pre-wrap">
+          {message.content}
+        </div>
+      </div>
+    )
+  }
+
+  // Assistant message — parse thinking blocks
+  const segments = parseThinkingBlocks(message.content)
+  const thinkingSegments = segments.filter(s => s.type === 'thinking')
+  const textSegments = segments.filter(s => s.type === 'text').map(s => ({
+    ...s,
+    content: stripControlTokens(s.content),
+  })).filter(s => s.content.length > 0)
+
+  return (
+    <div className="flex justify-start">
+      <div className="max-w-[85%]">
+        {thinkingSegments.length > 0 && (
+          <div className="mb-1">
+            {thinkingSegments.map((s, i) => (
+              <ThinkingBlock key={i} content={s.content} />
+            ))}
+          </div>
+        )}
+        {textSegments.length > 0 && (
+          <div className="bg-gray-800 border border-gray-700/50 rounded-lg px-4 py-2.5 text-sm text-gray-200 whitespace-pre-wrap">
+            {textSegments.map((s, i) => (
+              <span key={i}>{s.content}{i < textSegments.length - 1 ? '\n\n' : ''}</span>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
 }
 
 export default function ChatPage() {
   const queryClient = useQueryClient()
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [systemPrompt, setSystemPrompt] = useState('You are a helpful assistant.')
   const [userMessage, setUserMessage] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
@@ -16,6 +171,7 @@ export default function ChatPage() {
   const [includeTools, setIncludeTools] = useState(false)
   const [selectedModel, setSelectedModel] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
+  const [lastTelemetry, setLastTelemetry] = useState<TelemetryRecord | null>(null)
 
   const { data: models = [] } = useQuery({
     queryKey: ['models'],
@@ -25,7 +181,6 @@ export default function ChatPage() {
   const selectedModelInfo = models.find(m => m.id === selectedModel)
   const canSend = selectedModel && selectedModelInfo?.status === 'running' && !streaming
 
-  // Load model mutation
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: () => api.getSettings() })
   const loadMut = useMutation({
     mutationFn: (id: string) => api.loadModel(id, {
@@ -42,9 +197,21 @@ export default function ChatPage() {
     },
   })
 
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 150) + 'px'
+    }
+  }, [userMessage])
+
   async function sendMessage() {
     if (!userMessage.trim() || !canSend) return
     setError(null)
+    setLastTelemetry(null)
 
     const newMessages: Message[] = [
       { role: 'system', content: systemPrompt },
@@ -99,9 +266,8 @@ export default function ChatPage() {
         if (done) break
 
         buffer += decoder.decode(value, { stream: true })
-        // Split on double newlines (SSE event boundary)
         const events = buffer.split('\n\n')
-        buffer = events.pop() || ''  // keep incomplete event in buffer
+        buffer = events.pop() || ''
 
         for (const event of events) {
           for (const line of event.split('\n')) {
@@ -124,134 +290,181 @@ export default function ChatPage() {
           }
         }
       }
+
+      // After streaming completes, fetch telemetry
+      try {
+        const telData = await api.getTelemetry(selectedModel)
+        if (telData.records && telData.records.length > 0) {
+          setLastTelemetry(telData.records[0])
+        }
+      } catch {}
     } catch (err: any) {
-      const errMsg = err.message || 'Unknown error'
+      const errMsg = formatError(err)
       setError(errMsg)
-      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${errMsg}` }])
+      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${errMsg}`, isError: true }])
     } finally {
       setStreaming(false)
     }
   }
 
   return (
-    <div className="p-6 max-w-6xl h-full flex flex-col">
-      <h2 className="text-2xl font-bold mb-4">Chat</h2>
-
-      {/* Config row */}
-      <div className="flex gap-4 mb-4">
-        <div className="flex-1">
-          <label className="block text-sm text-gray-400 mb-1">Model</label>
+    <div className="flex flex-col h-full">
+      {/* Top bar: model selector + controls */}
+      <div className="shrink-0 border-b border-gray-800 bg-gray-950 px-4 py-3">
+        <div className="flex items-center gap-3 max-w-4xl mx-auto">
           <select
             value={selectedModel}
             onChange={(e) => { setSelectedModel(e.target.value); setError(null) }}
-            className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-md text-white"
+            className="flex-1 px-3 py-2 bg-gray-900 border border-gray-700 rounded-md text-white text-sm"
           >
             <option value="">Select a model...</option>
             {models.map(m => (
               <option key={m.id} value={m.id}>
-                {m.name} {m.status === 'running' ? '● running' : m.status === 'loading' ? '◌ loading' : '○ available'}
+                {m.name} {m.status === 'running' ? '●' : m.status === 'loading' ? '◌' : '○'}
               </option>
             ))}
           </select>
-        </div>
-        <div className="flex items-end">
-          <label className="flex items-center gap-2 text-sm text-gray-400">
+
+          <label className="flex items-center gap-1.5 text-xs text-gray-400 shrink-0">
             <input
               type="checkbox"
               checked={includeTools}
               onChange={(e) => setIncludeTools(e.target.checked)}
               className="rounded"
             />
-            Include tool calling
+            Tools
           </label>
-        </div>
-      </div>
 
-      {/* Load model if selected but not running */}
-      {selectedModel && selectedModelInfo?.status !== 'running' && (
-        <div className="mb-4 bg-yellow-900/30 border border-yellow-700/50 rounded-lg p-3 flex items-center justify-between">
-          <span className="text-yellow-300 text-sm">
-            {selectedModelInfo?.status === 'loading' ? 'Model is loading...' : 'This model needs to be loaded first.'}
-          </span>
-          {selectedModelInfo?.status === 'available' && (
+          {messages.length > 0 && (
             <button
-              onClick={() => loadMut.mutate(selectedModel)}
-              disabled={loadMut.isPending}
-              className="px-3 py-1.5 bg-teal-600 hover:bg-teal-500 disabled:bg-gray-700 rounded-md text-sm font-medium"
+              onClick={() => { setMessages([]); setError(null); setLastTelemetry(null) }}
+              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-md text-xs text-gray-400 hover:text-white transition-colors shrink-0"
             >
-              {loadMut.isPending ? 'Loading...' : 'Load Model'}
+              Clear
             </button>
           )}
         </div>
-      )}
-      {loadMut.error && (
-        <div className="mb-4 bg-red-900/30 border border-red-700/50 rounded-lg p-3 text-red-300 text-sm">
-          Failed to load: {(loadMut.error as Error).message}
-        </div>
-      )}
-      {error && (
-        <div className="mb-4 bg-red-900/30 border border-red-700/50 rounded-lg p-3 text-red-300 text-sm">
-          {error}
-        </div>
-      )}
 
-      {/* System prompt */}
-      <div className="mb-4">
-        <label className="block text-sm text-gray-400 mb-1">System Prompt</label>
-        <textarea
-          value={systemPrompt}
-          onChange={(e) => setSystemPrompt(e.target.value)}
-          className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-md text-white font-mono text-sm h-24 resize-y focus:outline-none focus:ring-2 focus:ring-teal-500"
-        />
-      </div>
-
-      {/* Chat messages */}
-      <div className="flex-1 overflow-y-auto bg-gray-900 border border-gray-800 rounded-lg p-4 mb-4">
-        {messages.length === 0 ? (
-          <p className="text-gray-400 text-center">Send a message to test the model.</p>
-        ) : (
-          <div className="space-y-3">
-            {messages.map((m, i) => (
-              <div key={i} className={`${
-                m.role === 'system' ? 'text-yellow-400' :
-                m.role === 'user' ? 'text-blue-300' :
-                'text-gray-100'
-              }`}>
-                <span className="text-xs font-bold uppercase mr-2">{m.role}</span>
-                <span className="whitespace-pre-wrap">{m.content}</span>
-              </div>
-            ))}
+        {/* Load model banner */}
+        {selectedModel && selectedModelInfo?.status !== 'running' && (
+          <div className="mt-2 max-w-4xl mx-auto bg-yellow-900/30 border border-yellow-700/50 rounded-lg p-2.5 flex items-center justify-between">
+            <span className="text-yellow-300 text-xs">
+              {selectedModelInfo?.status === 'loading' ? 'Model is loading...' :
+               selectedModelInfo?.status === 'error' ? 'Model failed to load previously.' :
+               'This model needs to be loaded first.'}
+            </span>
+            {(selectedModelInfo?.status === 'available' || selectedModelInfo?.status === 'error') && (
+              <button
+                onClick={() => loadMut.mutate(selectedModel)}
+                disabled={loadMut.isPending}
+                className="px-3 py-1 bg-teal-600 hover:bg-teal-500 disabled:bg-gray-700 rounded-md text-xs font-medium"
+              >
+                {loadMut.isPending ? 'Loading...' : selectedModelInfo?.status === 'error' ? 'Retry Load' : 'Load Model'}
+              </button>
+            )}
+          </div>
+        )}
+        {loadMut.error && (
+          <div className="mt-2 max-w-4xl mx-auto bg-red-900/30 border border-red-700/50 rounded-lg p-2.5 text-red-300 text-xs">
+            Failed to load: {formatError(loadMut.error)}
+          </div>
+        )}
+        {error && (
+          <div className="mt-2 max-w-4xl mx-auto bg-red-900/30 border border-red-700/50 rounded-lg p-2.5 text-red-300 text-xs">
+            {error}
           </div>
         )}
       </div>
 
-      {/* Input */}
-      <div className="flex gap-2">
-        <textarea
-          value={userMessage}
-          onChange={(e) => {
-            setUserMessage(e.target.value)
-            e.target.style.height = 'auto'
-            e.target.style.height = Math.min(e.target.scrollHeight, 150) + 'px'
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              sendMessage()
-            }
-          }}
-          disabled={!canSend}
-          placeholder={canSend ? "Type a message..." : selectedModel ? `Model status: ${selectedModelInfo?.status || 'unknown'}` : "Select a model"}
-          rows={1}
-          className="flex-1 px-4 py-2 bg-gray-900 border border-gray-700 rounded-md text-white disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none overflow-hidden"
-        />
-        <button
-          onClick={sendMessage}
-          disabled={!canSend}
-          className="px-4 py-2 bg-teal-600 hover:bg-teal-500 disabled:bg-gray-700 rounded-md font-medium self-end"
-        >
-          {streaming ? 'Streaming...' : 'Send'}
-        </button>
+      {/* Messages area */}
+      <div className="flex-1 overflow-y-auto px-4 py-6">
+        <div className="max-w-3xl mx-auto space-y-4">
+          {messages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-gray-500 py-20">
+              <svg className="w-12 h-12 mb-3 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+              <p className="text-sm">Select a model and send a message to start chatting.</p>
+            </div>
+          ) : (
+            messages.map((m, i) => (
+              <MessageBubble key={i} message={m} />
+            ))
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+      </div>
+
+      {/* Telemetry strip */}
+      {lastTelemetry && (
+        <div className="shrink-0 px-4 py-1.5 bg-gray-900/50 border-t border-gray-800">
+          <div className="max-w-3xl mx-auto flex gap-4 text-xs text-gray-500">
+            <span>{lastTelemetry.ttft_ms?.toFixed(0)}ms TTFT</span>
+            <span className="text-gray-700">·</span>
+            <span>{lastTelemetry.tokens_per_sec?.toFixed(1)} tok/s</span>
+            <span className="text-gray-700">·</span>
+            <span>{lastTelemetry.input_tokens ?? '?'} in / {lastTelemetry.output_tokens ?? '?'} out</span>
+            <span className="text-gray-700">·</span>
+            <span className={
+              lastTelemetry.backend === 'gguf' ? 'text-blue-400' :
+              lastTelemetry.backend === 'mlx' ? 'text-purple-400' : 'text-gray-500'
+            }>
+              {lastTelemetry.backend}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Input area */}
+      <div className="shrink-0 border-t border-gray-800 bg-gray-950 px-4 py-3">
+        <div className="max-w-3xl mx-auto">
+          {/* System prompt (collapsible) */}
+          <details className="mb-2">
+            <summary className="cursor-pointer text-xs text-gray-500 hover:text-gray-400 transition-colors select-none flex items-center gap-1">
+              <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+              System Prompt
+              {systemPrompt && systemPrompt !== 'You are a helpful assistant.' && (
+                <span className="text-gray-600 ml-1">— {systemPrompt.slice(0, 50)}{systemPrompt.length > 50 ? '...' : ''}</span>
+              )}
+            </summary>
+            <textarea
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              className="w-full mt-1 px-3 py-2 bg-gray-900 border border-gray-700 rounded-md text-white font-mono text-xs h-20 resize-y focus:outline-none focus:ring-2 focus:ring-teal-500"
+            />
+          </details>
+
+          {/* Message input */}
+          <div className="flex gap-2">
+            <textarea
+              ref={textareaRef}
+              value={userMessage}
+              onChange={(e) => setUserMessage(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  sendMessage()
+                }
+              }}
+              disabled={!canSend}
+              placeholder={canSend ? "Type a message... (Enter to send, Shift+Enter for newline)" : selectedModel ? `Model status: ${selectedModelInfo?.status || 'unknown'}` : "Select a model to start"}
+              rows={1}
+              className="flex-1 px-4 py-2.5 bg-gray-900 border border-gray-700 rounded-lg text-white text-sm disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none overflow-hidden"
+            />
+            <button
+              onClick={sendMessage}
+              disabled={!canSend}
+              className="px-5 py-2.5 bg-teal-600 hover:bg-teal-500 disabled:bg-gray-700 disabled:text-gray-500 rounded-lg font-medium text-sm self-end transition-colors"
+            >
+              {streaming ? (
+                <span className="flex items-center gap-1.5">
+                  <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="60" strokeDashoffset="15" /></svg>
+                  Streaming
+                </span>
+              ) : 'Send'}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   )
