@@ -1,4 +1,4 @@
-# JAMES — Just A Model Execution Server
+# Flow LLM — macOS LLM Orchestration
 
 Local LLM gateway for OpenClaw on Apple Silicon.
 
@@ -52,7 +52,7 @@ Then load it in the UI with your preferred settings (100K context, flash attenti
 
 ### 4. Configure OpenClaw
 
-Point OpenClaw to JAMES:
+Point OpenClaw to Flow:
 
 ```json
 {

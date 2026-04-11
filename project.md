@@ -1,6 +1,6 @@
-# JAMES Project Plan
+# Flow LLM Project Plan
 
-**Just A Model Execution Server** — phased implementation plan.
+**macOS LLM Orchestration** — phased implementation plan.
 
 ---
 

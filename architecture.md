@@ -1,6 +1,6 @@
-# JAMES Architecture
+# Flow LLM Architecture
 
-**Just A Model Execution Server** — a local LLM gateway for OpenClaw on Apple Silicon.
+**macOS LLM Orchestration** — a local LLM gateway for OpenClaw on Apple Silicon.
 
 ---
 
@@ -44,11 +44,11 @@ The core issue: **the layer between the model and OpenClaw must be transparent**
 ### 2.4 External Backend Support
 - Can adopt already-running llama-server instances via `/api/connect-external`
 - Auto-detects running backends on startup (scans common ports)
-- No need to restart models — just point JAMES at the running backend
+- No need to restart models — just point Flow at the running backend
 - Auto-detects model name from the backend's `/v1/models` endpoint
 - Matches detected models against the database (by ID, filename, or name), creates entries if needed
 - Strips `.gguf` extension from model names for database compatibility
-- **Unloading kills the process** — for external models, JAMES finds the PID on the model's port via `lsof` and sends SIGTERM (escalating to SIGKILL if needed)
+- **Unloading kills the process** — for external models, Flow finds the PID on the model's port via `lsof` and sends SIGTERM (escalating to SIGKILL if needed)
 
 ### 2.5 Frontend First
 - React + Tailwind SPA for model management and testing
@@ -136,7 +136,7 @@ The core issue: **the layer between the model and OpenClaw must be transparent**
 
 ```
 OpenClaw config:
-  base_url: http://127.0.0.1:3377/v1    ← JAMES proxy endpoint
+  base_url: http://127.0.0.1:3377/v1    ← Flow proxy endpoint
   model: gemma-4-26B-A4B-it-UD-Q4_K_M   ← model name in registry
 ```
 
@@ -164,7 +164,7 @@ OpenClaw sends standard OpenAI API requests. The proxy routes to whichever backe
 - Register local GGUF files (e.g. on external SSD)
 - Model loading with configurable context window, flash attention, KV cache quantization
 - Memory pressure indicator
-- Chat routes through JAMES proxy for telemetry
+- Chat routes through Flow proxy for telemetry
 
 ### 4.2 Management Server (FastAPI)
 
@@ -291,7 +291,7 @@ User clicks "Load" (or OpenClaw requests model)
 ### 5.2 Auto-Detect and Connect External Backend
 
 ```
-JAMES starts up
+Flow starts up
   → Lifespan handler scans ports 8081-8099 (GGUF) and 8100-8119 (MLX)
   → For each port, GET /v1/models to check for running backends
   → If found:
@@ -378,7 +378,7 @@ The management server detects the hardware profile on startup and adjusts:
 
 ## 8. Template Fidelity Guarantees
 
-This is the core differentiator from LM Studio and Ollama. JAMES guarantees:
+This is the core differentiator from LM Studio and Ollama. Flow guarantees:
 
 1. **No prompt injection** — The proxy never adds, removes, or modifies messages
 2. **No template override** — The backend uses the model's native chat template

@@ -1,4 +1,4 @@
-# JAMES — Agent Onboarding Guide
+# Flow LLM — Agent Onboarding Guide
 
 **Read this first when starting a new session.**
 
@@ -6,7 +6,7 @@
 
 ## What Is This Project?
 
-JAMES (Just A Model Execution Server) is a local LLM gateway for running OpenClaw with local models on Apple Silicon (M4 Macs). It solves the core problem of existing tools (LM Studio, Ollama) breaking model fidelity — specifically system prompts, chat templates, and tool calling.
+Flow (Just A Model Execution Server) is a local LLM gateway for running OpenClaw with local models on Apple Silicon (M4 Macs). It solves the core problem of existing tools (LM Studio, Ollama) breaking model fidelity — specifically system prompts, chat templates, and tool calling.
 
 ---
 
@@ -53,11 +53,11 @@ JAMES (Just A Model Execution Server) is a local LLM gateway for running OpenCla
 ## Critical Context
 
 ### The Core Problem
-LM Studio and Ollama break OpenClaw by modifying prompts, overriding chat templates, and injecting hidden content. JAMES is **transparent** — what OpenClaw sends is exactly what the model receives. No modification. No injection. No template override.
+LM Studio and Ollama break OpenClaw by modifying prompts, overriding chat templates, and injecting hidden content. Flow is **transparent** — what OpenClaw sends is exactly what the model receives. No modification. No injection. No template override.
 
 ### The Architecture
 ```
-OpenClaw → JAMES Proxy (/v1/chat/completions) → Backend Server → Model
+OpenClaw → Flow Proxy (/v1/chat/completions) → Backend Server → Model
                     ↑
           Management Server (FastAPI, /api/*)
                     ↑
@@ -84,7 +84,7 @@ OpenClaw → JAMES Proxy (/v1/chat/completions) → Backend Server → Model
 ## Project Structure
 
 ```
-JAMES-LLM/
+Flow-LLM/
 ├── architecture.md          # System design document
 ├── project.md               # Phased project plan
 ├── todo.md                  # Implementation checklist
@@ -117,7 +117,7 @@ JAMES-LLM/
 1. **No prompt modification** — The proxy never adds, removes, or changes messages. This is the #1 design constraint.
 2. **GGUF is primary** — llama.cpp server works with every model. MLX is secondary.
 3. **No auto-conversion** — GGUF → MLX conversion is manual.
-4. **Independent machines** — Each Mac runs its own JAMES instance.
+4. **Independent machines** — Each Mac runs its own Flow instance.
 5. **Template validation before loading** — Catches Gemma 4-style Jinja errors before runtime.
 6. **External backend support** — Can adopt already-running llama-server instances without restarting them. Auto-detects on startup.
 7. **Streaming proxy owns its HTTP client** — The streaming proxy creates its own httpx.AsyncClient inside the async generator to avoid the client being closed prematurely.
@@ -138,7 +138,7 @@ JAMES-LLM/
 | `/api/models/running` returns 404 | Route defined after `/{model_id}` catch-all | `running` route must be defined before `{model_id}` |
 | `recommended_max_model_gb` negative | Formula used available RAM minus headroom | Fixed to use total RAM minus headroom |
 | Streaming proxy returns nothing | httpx.AsyncClient closed before stream starts | Streaming generator now owns its own client, closed in `finally` |
-| Context window shows 50K instead of 100K | llama-server divides `--ctx-size` by `--parallel` | JAMES multiplies ctx_size × n_parallel internally |
+| Context window shows 50K instead of 100K | llama-server divides `--ctx-size` by `--parallel` | Flow multiplies ctx_size × n_parallel internally |
 | External model not visible in Chat | Chat only listed running models | Chat now lists all registered models, shows load button for available ones |
 | Unload doesn't kill external models | Duplicate `stop_model` method — second version didn't call `_kill_port()` | Removed duplicate method, kept only version that kills processes |
 | Auto-detect model ID mismatch | Detected name didn't match DB entry (e.g. Q4_K_S vs Q4_K_M) | Fuzzy matching by ID, filename, and name; creates DB entry if no match |

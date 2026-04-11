@@ -1,4 +1,4 @@
-# JAMES Todo List
+# Flow LLM Todo List
 
 Prioritized implementation checklist.
 
@@ -64,7 +64,7 @@ Prioritized implementation checklist.
 ## Remaining ⬜
 
 ### Phase 5: OpenClaw Validation (continued)
-- [ ] Automated fidelity test suite (JAMES output == direct llama.cpp output)
+- [ ] Automated fidelity test suite (Flow output == direct llama.cpp output)
 - [ ] Long context benchmark (1K, 4K, 16K, 100K)
 - [ ] Dual hardware validation (Mini + Max)
 - [ ] Reasoning mode test (Gemma 4 `<|think|>` tags)
@@ -79,6 +79,7 @@ Prioritized implementation checklist.
 - [ ] Telemetry charts (TTFT over time, throughput comparison, model comparison)
 - [ ] Config export/import (share between machines)
 - [ ] WebSocket real-time updates (model status, download progress)
+- [ ] Full UX design review (visual hierarchy, type scale, interaction patterns)
 
 ### Bugs Fixed
 - [x] Route ordering: `/api/models/running` before `/{model_id}` (404 fix)
@@ -88,6 +89,18 @@ Prioritized implementation checklist.
 - [x] Unload not killing external processes (duplicate `stop_model` removed, `_kill_port` escalation)
 - [x] Auto-detect model ID mismatch (fuzzy matching by ID/filename/name, create DB entry if needed)
 - [x] Process manager logger not visible (added `print()` statements)
+- [x] 422 on model load (removed redundant `model_id` from `ModelLoadRequest`)
+- [x] HuggingFace search had no model card, file sizes, or download destination
+
+### Design
+- [x] Rebrand from JAMES to Flow LLM
+- [x] Teal + magenta synthwave color scheme
+- [x] Bitcrushed waveform favicon and sidebar logo
+- [x] Model search results show instruct/vision/mlx badges
+- [x] Model detail card with description, tags, file breakdown, download destination
+- [x] GGUF and MLX tabs in model detail view
+- [x] "View on HuggingFace" link on model cards
+- [x] File path shown under local model entries
 
 ### Future
 - [ ] Multi-machine network routing
