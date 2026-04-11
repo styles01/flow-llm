@@ -2,19 +2,57 @@
 
 Local LLM gateway for OpenClaw on Apple Silicon.
 
+## Prerequisites
+
+Flow LLM requires **inference backends** to run models. Install at least one:
+
+### llama.cpp (required for GGUF models)
+
+```bash
+# Install via Homebrew
+brew install llama.cpp
+
+# Or build from source
+git clone https://github.com/ggml-org/llama.cpp
+cd llama.cpp && mkdir build && cd build
+cmake .. -DGGML_METAL=on && cmake --build . --config Release
+```
+
+This provides the `llama-server` command used to run GGUF models with Metal GPU acceleration.
+
+### mlx-openai-server (optional, for MLX models)
+
+```bash
+pip install mlx-openai-server
+```
+
+This provides the `mlx-openai-server` command for running MLX-format models. MLX models can be faster on Apple Silicon but have fewer compatible models than GGUF.
+
+### Verify installations
+
+```bash
+llama-server --version    # Should print llama.cpp version
+mlx-openai-server --help  # Should print help (optional, skip if not using MLX)
+```
+
 ## Quick Start
 
-### 1. Start the backend
+### 1. Install Python dependencies
 
 ```bash
 cd ~/JAMES-LLM/server
 pip install -e .
+```
+
+### 2. Start the backend
+
+```bash
 python3 -m james.main
 ```
 
 Server starts on **http://localhost:3377**
 
-### 2. Start the frontend (dev mode)
+### 3. Start the frontend (dev mode)
 
 ```bash
 cd ~/JAMES-LLM/web
@@ -32,15 +70,15 @@ cd ~/JAMES-LLM/server && python3 -m james.main
 # Everything at http://localhost:3377
 ```
 
-### 3. Connect a running model
+### 4. Connect a running model
 
 If you already have a llama-server running (e.g. from `gemma4.sh`):
 
-1. Open JAMES UI → **Models** → **Connect Running Model**
+1. Open Flow UI → **Models** → **Connect Running Model**
 2. Enter the URL (e.g. `http://127.0.0.1:8081`)
-3. Click **Connect** — JAMES auto-detects the model name
+3. Click **Connect** — Flow auto-detects the model name
 
-Or register a local GGUF file and load through JAMES:
+Or register a local GGUF file and load through Flow:
 
 ```bash
 curl -X POST http://localhost:3377/api/register-local \
@@ -50,7 +88,7 @@ curl -X POST http://localhost:3377/api/register-local \
 
 Then load it in the UI with your preferred settings (100K context, flash attention, q4_0 KV cache).
 
-### 4. Configure OpenClaw
+### 5. Configure OpenClaw
 
 Point OpenClaw to Flow:
 
@@ -67,6 +105,36 @@ Point OpenClaw to Flow:
   }
 }
 ```
+
+## Dependencies
+
+### Required
+
+| Dependency | Purpose | Install |
+|-----------|---------|---------|
+| Python 3.11+ | Runtime | System |
+| llama.cpp | GGUF inference backend | `brew install llama.cpp` |
+| Node.js 18+ | Frontend build | `brew install node` |
+
+### Python packages (installed via `pip install -e .`)
+
+| Package | Purpose |
+|---------|---------|
+| fastapi | Management server and API |
+| uvicorn | ASGI server |
+| httpx | Async HTTP proxy |
+| sqlalchemy | Model registry (SQLite) |
+| huggingface-hub | Model search and download |
+| jinja2 | Chat template validation |
+| psutil | Hardware detection |
+| pydantic | Request/response models |
+| websockets | Real-time updates |
+
+### Optional
+
+| Dependency | Purpose | Install |
+|-----------|---------|---------|
+| mlx-openai-server | MLX inference backend | `pip install mlx-openai-server` |
 
 ## Architecture
 
@@ -98,7 +166,7 @@ See [architecture.md](architecture.md) for the full design.
 
 | Port | Service |
 |------|---------|
-| 3377 | JAMES management server |
+| 3377 | Flow management server |
 | 5173 | Frontend dev server (Vite) |
 | 8081+ | llama.cpp backend processes |
 | 8100+ | mlx-openai-server backend processes |
@@ -136,7 +204,7 @@ See [architecture.md](architecture.md) for the full design.
 
 ## Connect External Backend
 
-JAMES can connect to an already-running backend (like a manually-started llama-server) without restarting it:
+Flow can connect to an already-running backend (like a manually-started llama-server) without restarting it:
 
 ```bash
 curl -X POST http://localhost:3377/api/connect-external \
@@ -148,7 +216,7 @@ This auto-detects the model name from the backend and registers it as running. T
 
 ## Model Loading Defaults
 
-JAMES ships with sensible defaults for Apple Silicon:
+Flow ships with sensible defaults for Apple Silicon:
 
 - **Context window**: 100,000 tokens (OpenClaw needs large context)
 - **Flash attention**: On (critical for long context)

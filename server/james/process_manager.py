@@ -77,6 +77,19 @@ class BackendProcess:
         """Start the backend process. Returns True if successful."""
         cmd = self.build_command()
         logger.info(f"Starting {self.backend} backend: {' '.join(cmd)}")
+        print(f"[Flow] Starting {self.backend} backend: {' '.join(cmd)}")
+
+        # Check if the command exists
+        import shutil
+        if not shutil.which(cmd[0]):
+            error_msg = f"Backend command not found: {cmd[0]}. Install it first."
+            if self.backend == "mlx":
+                error_msg = f"mlx-openai-server is not installed. Install with: pip install mlx-openai-server"
+            elif self.backend == "gguf":
+                error_msg = f"llama-server is not installed. Install llama.cpp first."
+            logger.error(error_msg)
+            print(f"[Flow] {error_msg}")
+            raise RuntimeError(error_msg)
 
         try:
             self.process = subprocess.Popen(
@@ -89,13 +102,18 @@ class BackendProcess:
             if self.process.poll() is not None:
                 stderr = self.process.stderr.read().decode() if self.process.stderr else ""
                 logger.error(f"Backend process died immediately: {stderr}")
-                return False
+                print(f"[Flow] Backend process died immediately: {stderr[:500]}")
+                raise RuntimeError(f"Backend process exited immediately: {stderr[:300]}")
 
             logger.info(f"Backend started: model={self.model_id} port={self.port} pid={self.process.pid}")
+            print(f"[Flow] Backend started: model={self.model_id} port={self.port} pid={self.process.pid}")
             return True
+        except RuntimeError:
+            raise
         except Exception as e:
             logger.error(f"Failed to start backend: {e}")
-            return False
+            print(f"[Flow] Failed to start backend: {e}")
+            raise RuntimeError(f"Failed to start {self.backend} backend: {e}")
 
     async def stop(self) -> bool:
         """Stop the backend process gracefully."""
@@ -224,10 +242,11 @@ class ProcessManager:
             n_parallel=n_parallel,
         )
 
-        success = await proc.start()
-        if not success:
+        try:
+            await proc.start()
+        except Exception:
             self._free_port(port)
-            raise RuntimeError(f"Failed to start model {model_id}")
+            raise
 
         self._processes[model_id] = proc
         self._port_alloc[port] = model_id

@@ -1,1 +1,82 @@
 @import "tailwindcss";
+
+/* ── Flow LLM Design Tokens ── */
+
+@theme {
+  /* Backgrounds */
+  --color-bg-base: #030712;
+  --color-bg-surface: #111827;
+  --color-bg-elevated: #1f2937;
+  --color-bg-hover: #1f2937;
+
+  /* Borders */
+  --color-border: rgba(55, 65, 81, 0.4);
+  --color-border-active: rgba(45, 212, 191, 0.4);
+  --color-border-accent: rgba(232, 121, 249, 0.3);
+
+  /* Text */
+  --color-text-primary: #f3f4f6;
+  --color-text-secondary: #9ca3af;
+  --color-text-muted: #6b7280;
+
+  /* Primary (teal) */
+  --color-primary: #2dd4bf;
+  --color-primary-dim: #0d9488;
+  --color-primary-glow: rgba(45, 212, 191, 0.2);
+
+  /* Accent (fuchsia/magenta) */
+  --color-accent: #e879f9;
+  --color-accent-dim: #a21caf;
+
+  /* Status */
+  --color-success: #4ade80;
+  --color-warning: #fbbf24;
+  --color-danger: #f87171;
+
+  /* Waveform / oscilloscope */
+  --color-waveform-teal: #2dd4bf;
+  --color-waveform-magenta: #e879f9;
+  --color-grid-line: rgba(94, 234, 212, 0.15);
+  --color-center-axis: rgba(94, 234, 212, 0.3);
+}
+
+/* ── Oscilloscope Visual Effects ── */
+
+/* Scanline overlay — apply to <main> content area */
+.osc-scanlines::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 1px,
+    rgba(0, 0, 0, 0.03) 1px,
+    rgba(0, 0, 0, 0.03) 2px
+  );
+  z-index: 9999;
+}
+
+/* Phosphor glow — apply to active cards, nav items, focused inputs */
+.osc-glow {
+  box-shadow: 0 0 20px rgba(45, 212, 191, 0.08), 0 0 40px rgba(45, 212, 191, 0.04);
+}
+.osc-glow-active {
+  box-shadow: 0 0 12px rgba(45, 212, 191, 0.15), 0 0 30px rgba(45, 212, 191, 0.08);
+}
+.osc-glow-accent {
+  box-shadow: 0 0 12px rgba(232, 121, 249, 0.15), 0 0 30px rgba(232, 121, 249, 0.08);
+}
+
+/* Neon border — active sidebar indicator */
+.osc-border-active {
+  border-left: 2px solid #2dd4bf;
+  box-shadow: inset 2px 0 8px rgba(45, 212, 191, 0.15);
+}
+
+/* Waveform animation for Dashboard hero */
+@keyframes osc-trace {
+  0%, 100% { d: path("M0 16 Q8 4, 16 16 Q24 28, 32 16"); }
+  50%      { d: path("M0 16 Q8 28, 16 16 Q24 4, 32 16"); }
+}

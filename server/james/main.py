@@ -169,17 +169,17 @@ async def lifespan(app: FastAPI):
     db_session_factory = init_db(settings.db_path)
     hf_client = HuggingFaceClient(token=None)  # TODO: load from config
 
-    # Reset any stale "running" statuses from previous sessions
+    # Reset any stale "running" or "error" statuses from previous sessions
     session = db_session_factory()
     try:
-        stale = session.query(Model).filter(Model.status == "running").all()
+        stale = session.query(Model).filter(Model.status.in_(["running", "error"])).all()
         for m in stale:
             m.status = "available"
             m.port = None
             m.pid = None
         session.commit()
         if stale:
-            logger.info(f"Reset {len(stale)} stale running model(s) to available")
+            logger.info(f"Reset {len(stale)} stale model(s) to available")
     finally:
         session.close()
 
@@ -704,6 +704,10 @@ async def load_model(model_id: str, request: ModelLoadRequest):
         if model.status == "running":
             raise HTTPException(400, f"Model {model_id} is already running")
 
+        # Reset error status to available for retry
+        if model.status == "error":
+            model.status = "available"
+
         # Determine model path
         model_path = model.gguf_file or model.mlx_path
         if not model_path or not Path(model_path).exists():
@@ -834,9 +838,14 @@ async def get_hf_model(model_id: str):
         gguf_repo_files = hf_client.list_gguf_files(details["gguf_repo_id"])
 
     # If there's an MLX variant repo, fetch its details
+    # If this model IS MLX (mlx_repo_id == model_id), use its own details as mlx_details
     mlx_details = None
     if details.get("mlx_repo_id"):
-        mlx_details = hf_client.get_model_details(details["mlx_repo_id"])
+        if details["mlx_repo_id"] == model_id:
+            # Model is itself MLX — use its own details
+            mlx_details = details
+        else:
+            mlx_details = hf_client.get_model_details(details["mlx_repo_id"])
 
     return {
         **details,

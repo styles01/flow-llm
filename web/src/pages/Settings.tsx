@@ -56,11 +56,11 @@ export default function SettingsPage() {
         <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <p className="text-xs text-gray-500">Status</p>
+              <p className="text-xs text-gray-400">Status</p>
               <p className="font-medium">{health?.status ?? 'Unknown'}</p>
             </div>
             <div>
-              <p className="text-xs text-gray-500">Running Models</p>
+              <p className="text-xs text-gray-400">Running Models</p>
               <p className="font-medium">{health?.running_models ?? 0}</p>
             </div>
           </div>
@@ -85,7 +85,7 @@ export default function SettingsPage() {
               onChange={e => setCtxSize(Number(e.target.value))}
               className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
             />
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-xs text-gray-400 mt-1">
               Effective total: {effectiveCtx.toLocaleString()} tokens ({ctxSize.toLocaleString()} × {nParallel} slots)
             </p>
           </div>
@@ -103,7 +103,7 @@ export default function SettingsPage() {
               max={8}
               className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
             />
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-xs text-gray-400 mt-1">
               Concurrent request slots — needed for multi-turn agent conversations. More slots = more memory.
             </p>
           </div>
@@ -122,7 +122,7 @@ export default function SettingsPage() {
               <option value="off">Off</option>
               <option value="auto">Auto</option>
             </select>
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-xs text-gray-400 mt-1">
               Critical for long context windows. Keep On.
             </p>
           </div>
@@ -134,7 +134,7 @@ export default function SettingsPage() {
             </label>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <p className="text-xs text-gray-500 mb-1">Keys</p>
+                <p className="text-xs text-gray-400 mb-1">Keys</p>
                 <select
                   value={cacheTypeK}
                   onChange={e => setCacheTypeK(e.target.value)}
@@ -146,7 +146,7 @@ export default function SettingsPage() {
                 </select>
               </div>
               <div>
-                <p className="text-xs text-gray-500 mb-1">Values</p>
+                <p className="text-xs text-gray-400 mb-1">Values</p>
                 <select
                   value={cacheTypeV}
                   onChange={e => setCacheTypeV(e.target.value)}
@@ -158,7 +158,7 @@ export default function SettingsPage() {
                 </select>
               </div>
             </div>
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-xs text-gray-400 mt-1">
               q4_0 recommended for 100K+ context. f16 for maximum quality.
             </p>
           </div>
@@ -174,7 +174,7 @@ export default function SettingsPage() {
               onChange={e => setGpuLayers(Number(e.target.value))}
               className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
             />
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-xs text-gray-400 mt-1">
               -1 = all layers on Metal GPU (recommended for Apple Silicon)
             </p>
           </div>
@@ -201,27 +201,27 @@ export default function SettingsPage() {
           <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
             <div className="grid grid-cols-3 gap-4">
               <div>
-                <p className="text-xs text-gray-500">Chip</p>
+                <p className="text-xs text-gray-400">Chip</p>
                 <p className="font-medium">{hw.chip}</p>
               </div>
               <div>
-                <p className="text-xs text-gray-500">Total Memory</p>
+                <p className="text-xs text-gray-400">Total Memory</p>
                 <p className="font-medium">{hw.memory_total_gb} GB</p>
               </div>
               <div>
-                <p className="text-xs text-gray-500">Available</p>
+                <p className="text-xs text-gray-400">Available</p>
                 <p className="font-medium">{hw.memory_available_gb.toFixed(1)} GB</p>
               </div>
               <div>
-                <p className="text-xs text-gray-500">Apple Silicon</p>
+                <p className="text-xs text-gray-400">Apple Silicon</p>
                 <p className="font-medium">{hw.is_apple_silicon ? 'Yes' : 'No'}</p>
               </div>
               <div>
-                <p className="text-xs text-gray-500">Metal GPU</p>
+                <p className="text-xs text-gray-400">Metal GPU</p>
                 <p className="font-medium">{hw.metal_supported ? 'Supported' : 'Not supported'}</p>
               </div>
               <div>
-                <p className="text-xs text-gray-500">CPU Cores</p>
+                <p className="text-xs text-gray-400">CPU Cores</p>
                 <p className="font-medium">{hw.cpu_count}</p>
               </div>
             </div>
@@ -233,7 +233,7 @@ export default function SettingsPage() {
                   style={{ width: `${(hw.memory_used_gb / hw.memory_total_gb) * 100}%` }}
                 />
               </div>
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="text-xs text-gray-400 mt-1">
                 {hw.memory_used_gb.toFixed(1)} GB used — {hw.memory_available_gb.toFixed(1)} GB available — max model ~{hw.recommended_max_model_gb.toFixed(1)} GB
               </p>
             </div>
@@ -245,15 +245,15 @@ export default function SettingsPage() {
       <section>
         <h3 className="text-lg font-semibold mb-3 text-gray-300">OpenClaw Configuration</h3>
         <p className="text-sm text-gray-400 mb-3">
-          Copy this into your OpenClaw config to connect to JAMES.
+          Copy this into your OpenClaw config to connect to Flow.
         </p>
         <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 font-mono text-sm text-gray-300 overflow-x-auto">
           <pre>{`{
   "models": {
     "providers": {
-      "james": {
+      "flow": {
         "baseUrl": "http://127.0.0.1:3377/v1",
-        "apiKey": "james-local",
+        "apiKey": "flow-local",
         "api": "openai-completions"
       }
     }

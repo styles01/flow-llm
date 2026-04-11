@@ -1,11 +1,21 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 
 export default function RunningPage() {
+  const queryClient = useQueryClient()
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['running'],
     queryFn: () => api.listRunning(),
     refetchInterval: 5000,
+  })
+
+  const unloadMut = useMutation({
+    mutationFn: (id: string) => api.unloadModel(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['running'] })
+      queryClient.invalidateQueries({ queryKey: ['models'] })
+    },
   })
 
   const models = data?.models ?? []
@@ -14,7 +24,7 @@ export default function RunningPage() {
   return (
     <div className="p-6 max-w-6xl">
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold">Running Models</h2>
+        <h2 className="text-2xl font-bold">Instances</h2>
         <button
           onClick={() => refetch()}
           className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-sm"
@@ -29,19 +39,19 @@ export default function RunningPage() {
           <h3 className="text-sm font-medium text-gray-400 mb-2">Hardware</h3>
           <div className="grid grid-cols-4 gap-4">
             <div>
-              <p className="text-xs text-gray-500">Chip</p>
+              <p className="text-xs text-gray-400">Chip</p>
               <p className="font-medium">{hw.chip}</p>
             </div>
             <div>
-              <p className="text-xs text-gray-500">Total RAM</p>
+              <p className="text-xs text-gray-400">Total RAM</p>
               <p className="font-medium">{hw.memory_total_gb} GB</p>
             </div>
             <div>
-              <p className="text-xs text-gray-500">Available</p>
+              <p className="text-xs text-gray-400">Available</p>
               <p className="font-medium">{hw.memory_available_gb.toFixed(1)} GB</p>
             </div>
             <div>
-              <p className="text-xs text-gray-500">Used</p>
+              <p className="text-xs text-gray-400">Used</p>
               <p className="font-medium">{hw.memory_used_gb.toFixed(1)} GB</p>
             </div>
           </div>
@@ -53,7 +63,7 @@ export default function RunningPage() {
                 style={{ width: `${(hw.memory_used_gb / hw.memory_total_gb) * 100}%` }}
               />
             </div>
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-xs text-gray-400 mt-1">
               {(hw.memory_used_gb / hw.memory_total_gb * 100).toFixed(0)}% used — {hw.memory_available_gb.toFixed(1)} GB available
             </p>
           </div>
@@ -64,7 +74,7 @@ export default function RunningPage() {
       {isLoading ? (
         <p className="text-gray-500">Loading...</p>
       ) : models.length === 0 ? (
-        <p className="text-gray-500">No models running. Load a model from the Models page.</p>
+        <p className="text-gray-500">No models running. <Link to="/models" className="text-teal-400 hover:text-white underline">Go to Models</Link></p>
       ) : (
         <div className="space-y-3">
           {models.map((m) => (
@@ -78,7 +88,7 @@ export default function RunningPage() {
                       m.backend === 'gguf' ? 'bg-blue-900/50 text-blue-300' : 'bg-purple-900/50 text-purple-300'
                     }`}>{m.backend}</span>
                   </div>
-                  <p className="text-sm text-gray-500 mt-1">
+                  <p className="text-sm text-gray-400 mt-1">
                     Port {m.port} · PID {m.pid} · {m.base_url}
                   </p>
                 </div>
@@ -91,9 +101,11 @@ export default function RunningPage() {
                     Open UI
                   </a>
                   <button
-                    className="px-3 py-1.5 bg-fuchsia-900/40 hover:bg-fuchsia-800 text-fuchsia-300 rounded-md text-sm"
+                    onClick={() => unloadMut.mutate(m.model_id)}
+                    disabled={unloadMut.isPending}
+                    className="px-3 py-1.5 bg-fuchsia-900/40 hover:bg-fuchsia-800 text-fuchsia-300 rounded-md text-sm disabled:opacity-50"
                   >
-                    Unload
+                    {unloadMut.isPending ? 'Unloading...' : 'Unload'}
                   </button>
                 </div>
               </div>

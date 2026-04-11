@@ -1,0 +1,137 @@
+import { useState, useEffect } from 'react'
+import { NavLink } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '../api/client'
+
+// Oscilloscope-themed nav icons — all 20x20, stroke-width 1.5, round caps/joins
+const icons = {
+  models: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="2" width="14" height="4" rx="1" />
+      <rect x="3" y="8" width="14" height="4" rx="1" />
+      <rect x="3" y="14" width="14" height="4" rx="1" />
+    </svg>
+  ),
+  instances: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="10" cy="10" r="4" />
+      <circle cx="10" cy="10" r="7" strokeDasharray="3 3" />
+      <circle cx="10" cy="10" r="1.5" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+  chat: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 4h14a1 1 0 011 1v8a1 1 0 01-1 1H7l-4 3v-3H3a1 1 0 01-1-1V5a1 1 0 011-1z" />
+      <path d="M6 8h2M10 8h4" />
+    </svg>
+  ),
+  telemetry: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 15l4-5 3 3 4-7 3 4" />
+      <line x1="3" y1="17" x2="17" y2="17" />
+      <line x1="3" y1="3" x2="3" y2="17" />
+    </svg>
+  ),
+  settings: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="10" cy="10" r="3" />
+      <path d="M10 1v2M10 17v2M1 10h2M17 10h2M3.5 3.5l1.4 1.4M15.1 15.1l1.4 1.4M3.5 16.5l1.4-1.4M15.1 4.9l1.4-1.4" />
+    </svg>
+  ),
+}
+
+const navItems = [
+  { to: '/', label: 'Models', icon: icons.models, badge: null as string | null },
+  { to: '/running', label: 'Instances', icon: icons.instances, badge: 'running' as const },
+  { to: '/chat', label: 'Chat', icon: icons.chat, badge: null as string | null },
+  { to: '/telemetry', label: 'Telemetry', icon: icons.telemetry, badge: null as string | null },
+  { to: '/settings', label: 'Settings', icon: icons.settings, badge: null as string | null },
+]
+
+export function Sidebar() {
+  const [collapsed, setCollapsed] = useState(() => {
+    const saved = localStorage.getItem('flow.sidebar_collapsed')
+    return saved === 'true'
+  })
+
+  // Fetch running models count for badge
+  const { data: runningData } = useQuery({
+    queryKey: ['running'],
+    queryFn: () => api.listRunning(),
+    refetchInterval: 10000,
+  })
+
+  const runningCount = runningData?.models?.length ?? 0
+
+  useEffect(() => {
+    localStorage.setItem('flow.sidebar_collapsed', String(collapsed))
+  }, [collapsed])
+
+  return (
+    <nav className={`${collapsed ? 'w-14' : 'w-56'} bg-gray-900 border-r border-gray-800 flex flex-col transition-all duration-200 ease-out`}>
+      {/* Logo area */}
+      <div className={`p-4 border-b border-gray-800 ${collapsed ? 'flex justify-center' : ''}`}>
+        <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-2'}`}>
+          <svg className={collapsed ? 'w-5 h-5' : 'w-7 h-7'} viewBox="0 0 32 32" fill="none">
+            <path d="M1 20 H4 V12 H6 V20 H8 V8 H10 V20 H12 V14 H14 V20 H16 V6 H18 V20 H20 V10 H22 V20 H24 V16 H26 V20 H28 V12 H31" stroke="#2dd4bf" strokeWidth="1.5" strokeMiterlimit="miter"/>
+            <path d="M1 24 H4 V18 H6 V24 H8 V16 H10 V24 H12 V20 H14 V24 H16 V14 H18 V24 H20 V18 H22 V24 H24 V22 H26 V24 H28 V20 H31" stroke="#e879f9" strokeWidth="1.5" strokeMiterlimit="miter" opacity="0.7"/>
+            <line x1="1" y1="16" x2="31" y2="16" stroke="#5eead4" strokeWidth="0.3" opacity="0.4"/>
+          </svg>
+          {!collapsed && (
+            <div>
+              <h1 className="text-lg font-bold text-white">Flow</h1>
+              <p className="text-xs text-gray-400 -mt-0.5">macOS LLM Orchestration</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Nav items */}
+      <div className="flex-1 p-2 space-y-1">
+        {navItems.map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.to === '/'}
+            className={({ isActive }) => {
+              let cls = 'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 relative'
+              if (isActive) {
+                cls += ' bg-teal-400/10 text-white border-l-2 border-l-teal-400 osc-border-active'
+              } else {
+                cls += ' text-gray-400 hover:bg-gray-800 hover:text-white'
+              }
+              if (collapsed) {
+                cls += ' justify-center px-0'
+              }
+              return cls
+            }}
+          >
+            <span className="shrink-0">{item.icon}</span>
+            {!collapsed && <span>{item.label}</span>}
+            {/* Badges */}
+            {item.badge === 'running' && runningCount > 0 && !collapsed && (
+              <span className="ml-auto w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+            )}
+            {item.badge === 'running' && runningCount > 0 && collapsed && (
+              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+            )}
+          </NavLink>
+        ))}
+      </div>
+
+      {/* Collapse toggle & version */}
+      <div className={`p-4 border-t border-gray-800 flex ${collapsed ? 'justify-center' : 'items-center justify-between'}`}>
+        {!collapsed && <p className="text-xs text-gray-600">v0.1.0</p>}
+        <button
+          onClick={() => setCollapsed(!collapsed)}
+          className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          <svg className="w-4 h-4 transition-transform" style={{ transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7M18 19l-7-7 7-7" />
+          </svg>
+        </button>
+      </div>
+    </nav>
+  )
+}

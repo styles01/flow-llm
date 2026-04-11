@@ -135,7 +135,7 @@ export default function ChatPage() {
 
   return (
     <div className="p-6 max-w-6xl h-full flex flex-col">
-      <h2 className="text-2xl font-bold mb-4">Chat Test</h2>
+      <h2 className="text-2xl font-bold mb-4">Chat</h2>
 
       {/* Config row */}
       <div className="flex gap-4 mb-4">
@@ -208,7 +208,7 @@ export default function ChatPage() {
       {/* Chat messages */}
       <div className="flex-1 overflow-y-auto bg-gray-900 border border-gray-800 rounded-lg p-4 mb-4">
         {messages.length === 0 ? (
-          <p className="text-gray-500 text-center">Send a message to test the model.</p>
+          <p className="text-gray-400 text-center">Send a message to test the model.</p>
         ) : (
           <div className="space-y-3">
             {messages.map((m, i) => (
@@ -227,19 +227,28 @@ export default function ChatPage() {
 
       {/* Input */}
       <div className="flex gap-2">
-        <input
-          type="text"
+        <textarea
           value={userMessage}
-          onChange={(e) => setUserMessage(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendMessage()}
+          onChange={(e) => {
+            setUserMessage(e.target.value)
+            e.target.style.height = 'auto'
+            e.target.style.height = Math.min(e.target.scrollHeight, 150) + 'px'
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              sendMessage()
+            }
+          }}
           disabled={!canSend}
           placeholder={canSend ? "Type a message..." : selectedModel ? `Model status: ${selectedModelInfo?.status || 'unknown'}` : "Select a model"}
-          className="flex-1 px-4 py-2 bg-gray-900 border border-gray-700 rounded-md text-white disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-teal-500"
+          rows={1}
+          className="flex-1 px-4 py-2 bg-gray-900 border border-gray-700 rounded-md text-white disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none overflow-hidden"
         />
         <button
           onClick={sendMessage}
           disabled={!canSend}
-          className="px-4 py-2 bg-teal-600 hover:bg-teal-500 disabled:bg-gray-700 rounded-md font-medium"
+          className="px-4 py-2 bg-teal-600 hover:bg-teal-500 disabled:bg-gray-700 rounded-md font-medium self-end"
         >
           {streaming ? 'Streaming...' : 'Send'}
         </button>

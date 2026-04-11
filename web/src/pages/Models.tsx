@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, type HFSearchResult, type GGUFFile, type ModelInfo } from '../api/client'
 import { LoadDialog } from '../components/LoadDialog'
+import { ConfirmationDialog } from '../components/ConfirmationDialog'
 
 function formatSize(bytes: number | null, gb: number | null): string {
   if (gb && gb >= 1) return `${gb} GB`
@@ -20,6 +21,7 @@ export default function ModelsPage() {
   const [registerName, setRegisterName] = useState('')
   const [externalUrl, setExternalUrl] = useState('')
   const [activeTab, setActiveTab] = useState<'gguf' | 'mlx' | 'files'>('gguf')
+  const [deleteTarget, setDeleteTarget] = useState<ModelInfo | null>(null)
 
   // Local models
   const { data: models = [], isLoading: modelsLoading } = useQuery({
@@ -134,78 +136,87 @@ export default function ModelsPage() {
         </div>
       </div>
 
-      {/* Register local model */}
-      <section className="mb-6 bg-gray-900 border border-gray-800 rounded-lg p-4">
-        <h3 className="text-sm font-semibold text-gray-300 mb-3">Register Existing Model</h3>
-        <p className="text-xs text-gray-500 mb-3">
-          Already have a GGUF file on disk? Register it here.
-        </p>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={registerPath}
-            onChange={e => setRegisterPath(e.target.value)}
-            placeholder="/Volumes/James4TBSSD/llms/model-Q4_K_M.gguf"
-            className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-teal-500"
-          />
-          <input
-            type="text"
-            value={registerName}
-            onChange={e => setRegisterName(e.target.value)}
-            placeholder="Display name (optional)"
-            className="w-48 px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-teal-500"
-          />
-          <button
-            onClick={() => registerMut.mutate()}
-            disabled={!registerPath.trim()}
-            className="px-4 py-2 bg-teal-600 hover:bg-teal-500 disabled:bg-gray-700 disabled:text-gray-500 rounded-md text-sm font-medium"
-          >
-            Register
-          </button>
-        </div>
-      </section>
+      {/* Advanced: Register & Connect */}
+      <details className="mb-6">
+        <summary className="text-sm font-semibold text-gray-400 cursor-pointer hover:text-white transition-colors select-none flex items-center gap-2">
+          <svg className="w-4 h-4 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+          Advanced: Register & Connect
+        </summary>
+        <div className="mt-3 space-y-4">
+          {/* Register local model */}
+          <section className="bg-gray-900 border border-gray-800 rounded-lg p-4">
+            <h3 className="text-sm font-semibold text-gray-300 mb-3">Register Existing Model</h3>
+            <p className="text-xs text-gray-400 mb-3">
+              Already have a GGUF file on disk? Register it here.
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={registerPath}
+                onChange={e => setRegisterPath(e.target.value)}
+                placeholder="/Volumes/James4TBSSD/llms/model-Q4_K_M.gguf"
+                className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-teal-500"
+              />
+              <input
+                type="text"
+                value={registerName}
+                onChange={e => setRegisterName(e.target.value)}
+                placeholder="Display name (optional)"
+                className="w-48 px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-teal-500"
+              />
+              <button
+                onClick={() => registerMut.mutate()}
+                disabled={!registerPath.trim()}
+                className="px-4 py-2 bg-teal-600 hover:bg-teal-500 disabled:bg-gray-700 disabled:text-gray-500 rounded-md text-sm font-medium"
+              >
+                Register
+              </button>
+            </div>
+          </section>
 
-      {/* Connect running model */}
-      <section className="mb-6 bg-gray-900 border border-fuchsia-900/30 rounded-lg p-4">
-        <h3 className="text-sm font-semibold text-fuchsia-300 mb-3">Connect Running Model</h3>
-        <p className="text-xs text-gray-500 mb-3">
-          Already have a llama-server or MLX backend running? Connect Flow to it without restarting.
-        </p>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={externalUrl}
-            onChange={e => setExternalUrl(e.target.value)}
-            placeholder="http://127.0.0.1:8081"
-            className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-fuchsia-500"
-          />
-          <button
-            onClick={() => connectMut.mutate()}
-            disabled={!externalUrl.trim() || connectMut.isPending}
-            className="px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-500 disabled:bg-gray-700 disabled:text-gray-500 rounded-md text-sm font-medium"
-          >
-            {connectMut.isPending ? 'Connecting...' : 'Connect'}
-          </button>
+          {/* Connect running model */}
+          <section className="bg-gray-900 border border-gray-800 rounded-lg p-4">
+            <h3 className="text-sm font-semibold text-gray-300 mb-3">Connect Running Model</h3>
+            <p className="text-xs text-gray-400 mb-3">
+              Already have a llama-server or MLX backend running? Connect Flow to it without restarting.
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={externalUrl}
+                onChange={e => setExternalUrl(e.target.value)}
+                placeholder="http://127.0.0.1:8081"
+                className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-teal-500"
+              />
+              <button
+                onClick={() => connectMut.mutate()}
+                disabled={!externalUrl.trim() || connectMut.isPending}
+                className="px-4 py-2 bg-teal-600 hover:bg-teal-500 disabled:bg-gray-700 disabled:text-gray-500 rounded-md text-sm font-medium"
+              >
+                {connectMut.isPending ? 'Connecting...' : 'Connect'}
+              </button>
+            </div>
+            {connectMut.isError && (
+              <p className="text-red-400 text-xs mt-2">{(connectMut.error as Error).message}</p>
+            )}
+            {connectMut.data && (
+              <p className="text-green-400 text-xs mt-2">
+                Connected! Model <span className="font-mono">{connectMut.data.model_id}</span> on port {connectMut.data.port}
+              </p>
+            )}
+          </section>
         </div>
-        {connectMut.isError && (
-          <p className="text-red-400 text-xs mt-2">{(connectMut.error as Error).message}</p>
-        )}
-        {connectMut.data && (
-          <p className="text-green-400 text-xs mt-2">
-            Connected! Model <span className="font-mono">{connectMut.data.model_id}</span> on port {connectMut.data.port}
-          </p>
-        )}
-      </section>
+      </details>
 
       {/* Local models */}
       <section className="mb-8">
         <h3 className="text-lg font-semibold mb-3 text-gray-300">Local Models</h3>
         {modelsLoading ? (
-          <p className="text-gray-500">Loading...</p>
+          <p className="text-gray-400">Loading...</p>
         ) : models.length === 0 ? (
           <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 text-center">
             <p className="text-gray-400 mb-2">No models yet.</p>
-            <p className="text-gray-500 text-sm">Download from HuggingFace below or register a local GGUF file above.</p>
+            <p className="text-gray-400 text-sm">Download from HuggingFace below or register a local GGUF file above.</p>
           </div>
         ) : (
           <div className="space-y-2">
@@ -243,7 +254,17 @@ export default function ModelsPage() {
                         Unload
                       </button>
                     </>
-                  ) : m.status === 'available' ? (
+                  ) : m.status === 'error' ? (
+                    <>
+                      <button
+                        onClick={() => setLoadDialogModel(m)}
+                        className="px-3 py-1.5 bg-teal-600 hover:bg-teal-500 rounded-md text-sm"
+                      >
+                        Retry
+                      </button>
+                      <span className="px-2 py-1.5 text-fuchsia-400 rounded-md text-xs">load failed</span>
+                    </>
+                  ) : m.status === 'available' || m.status === 'loading' ? (
                     <button
                       onClick={() => setLoadDialogModel(m)}
                       className="px-3 py-1.5 bg-teal-600 hover:bg-teal-500 rounded-md text-sm"
@@ -255,7 +276,7 @@ export default function ModelsPage() {
                   )}
                   {m.status !== 'running' && (
                     <button
-                      onClick={() => { if (confirm(`Delete ${m.name}?`)) deleteMut.mutate(m.id) }}
+                      onClick={() => setDeleteTarget(m)}
                       className="px-3 py-1.5 bg-fuchsia-900/40 hover:bg-fuchsia-800 text-fuchsia-300 rounded-md text-sm"
                     >
                       Delete
@@ -289,7 +310,7 @@ export default function ModelsPage() {
           </button>
         </div>
 
-        {searchHF.isPending && <p className="text-gray-500">Searching...</p>}
+        {searchHF.isPending && <p className="text-gray-400">Searching...</p>}
 
         {searchResults.length > 0 && (
           <div className="space-y-1 max-h-64 overflow-y-auto mb-4">
@@ -383,7 +404,7 @@ export default function ModelsPage() {
 
               {/* Download destination */}
               {hfDetails.models_dir && (
-                <div className="mt-3 flex items-center gap-2 text-xs text-gray-500">
+                <div className="mt-3 flex items-center gap-2 text-xs text-gray-400">
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                   </svg>
@@ -454,7 +475,7 @@ export default function ModelsPage() {
                     </div>
                   ))}
                   {hfDetails.gguf_repo_id && (
-                    <p className="text-xs text-gray-500 mt-2">
+                    <p className="text-xs text-gray-400 mt-2">
                       GGUF files from <span className="font-mono">{hfDetails.gguf_repo_id}</span>
                     </p>
                   )}
@@ -483,7 +504,7 @@ export default function ModelsPage() {
                           {downloading === mlxDetails.id.split('/').pop() ? 'Downloading...' : 'Download MLX Model'}
                         </button>
                       </div>
-                      <p className="text-xs text-gray-500 mb-3">
+                      <p className="text-xs text-gray-400 mb-3">
                         Downloads the entire model directory (weights, tokenizer, config) for Apple Silicon MLX inference.
                       </p>
                       {/* Show file breakdown */}
@@ -497,7 +518,7 @@ export default function ModelsPage() {
                             </div>
                           ))}
                           {mlxDetails.model_weights.length > 5 && (
-                            <p className="text-xs text-gray-500">+ {mlxDetails.model_weights.length - 5} more weight files</p>
+                            <p className="text-xs text-gray-400">+ {mlxDetails.model_weights.length - 5} more weight files</p>
                           )}
                           {mlxDetails.tokenizer_files.length > 0 && (
                             <p className="text-xs text-gray-400 mt-1">
@@ -571,7 +592,7 @@ export default function ModelsPage() {
                         </div>
                       ))}
                       {hfDetails.other_files.length > 20 && (
-                        <p className="text-xs text-gray-500">+ {hfDetails.other_files.length - 20} more files</p>
+                        <p className="text-xs text-gray-400">+ {hfDetails.other_files.length - 20} more files</p>
                       )}
                     </div>
                   )}
@@ -590,6 +611,18 @@ export default function ModelsPage() {
             setLoadDialogModel(null)
             queryClient.invalidateQueries({ queryKey: ['models'] })
           }}
+        />
+      )}
+
+      {/* Delete confirmation */}
+      {deleteTarget && (
+        <ConfirmationDialog
+          title="Delete Model"
+          message={`This will permanently delete ${deleteTarget.name} and remove it from disk. This cannot be undone.`}
+          confirmLabel="Delete"
+          variant="danger"
+          onConfirm={() => { deleteMut.mutate(deleteTarget.id); setDeleteTarget(null) }}
+          onCancel={() => setDeleteTarget(null)}
         />
       )}
     </div>

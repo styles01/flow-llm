@@ -20,9 +20,9 @@ export default function TelemetryPage() {
       </div>
 
       {isLoading ? (
-        <p className="text-gray-500">Loading...</p>
+        <p className="text-gray-400">Loading...</p>
       ) : records.length === 0 ? (
-        <p className="text-gray-500">No telemetry data yet. Send some requests through the proxy to see stats.</p>
+        <p className="text-gray-400">No telemetry data yet. Send some requests through the proxy to see stats.</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">

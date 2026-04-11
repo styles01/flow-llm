@@ -60,7 +60,8 @@ class HuggingFaceClient:
     def get_model_details(self, model_id: str) -> Optional[dict]:
         """Get rich details about a model including description, files, and sizes."""
         try:
-            model_info = self.api.model_info(model_id)
+            # files_metadata=True is required to get file sizes from the API
+            model_info = self.api.model_info(model_id, files_metadata=True)
             siblings = []
             if model_info.siblings:
                 siblings = [s.rfilename for s in model_info.siblings]
@@ -145,16 +146,30 @@ class HuggingFaceClient:
 
             # Check for GGUF variants (separate repos with -GGUF suffix)
             gguf_repo_id = None
-            try:
-                gguf_repo_id = f"{model_info.author or model_info.id.split('/')[0]}/{model_info.id.split('/')[-1]}-GGUF"
-                self.api.model_info(gguf_repo_id)
-            except Exception:
-                gguf_repo_id = None
+            if not any(f.endswith(".gguf") for f in siblings):
+                # Only look for GGUF variant if this repo has no GGUF files
+                base_name = model_info.id.split("/")[-1] if "/" in model_info.id else model_info.id
+                author = model_info.author or model_info.id.split("/")[0]
+                # Try common GGUF repo naming patterns
+                gguf_candidates = [
+                    f"{author}/{base_name}-GGUF",
+                    f"bartowski/{base_name}-GGUF",
+                ]
+                for candidate in gguf_candidates:
+                    try:
+                        self.api.model_info(candidate)
+                        gguf_repo_id = candidate
+                        break
+                    except Exception:
+                        continue
 
             # Check for MLX variants
             mlx_repo_id = None
-            if not is_mlx:
-                # Try common MLX naming patterns
+            if is_mlx:
+                # This model IS MLX — point to itself
+                mlx_repo_id = model_info.id
+            else:
+                # Try common MLX naming patterns for non-MLX models
                 base_name = model_info.id.split("/")[-1] if "/" in model_info.id else model_info.id
                 for prefix in ["mlx-community", "mlx"]:
                     try:
@@ -199,7 +214,7 @@ class HuggingFaceClient:
     def list_gguf_files(self, model_id: str) -> list[dict]:
         """List GGUF files available for a model, with size and quant info."""
         try:
-            model_info = self.api.model_info(model_id)
+            model_info = self.api.model_info(model_id, files_metadata=True)
             if not model_info.siblings:
                 return []
 
