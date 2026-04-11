@@ -429,6 +429,31 @@ export default function ChatPage() {
               <MessageBubble key={i} message={m} />
             ))
           )}
+          {/* Processing progress bar */}
+          {streaming && processingProgress !== null && processingProgress > 0 && (
+            <div className="flex justify-start">
+              <div className="max-w-[80%] bg-gray-800 border border-gray-700/50 rounded-lg px-4 py-3 text-sm text-gray-400 w-64">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs text-gray-500">Processing...</span>
+                  <span className="text-xs text-teal-400 font-mono">{Math.round(processingProgress * 100)}%</span>
+                </div>
+                <div className="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-teal-500 to-teal-300 rounded-full transition-all duration-300 osc-glow"
+                    style={{ width: `${Math.round(processingProgress * 100)}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+          {streaming && processingProgress === null && (
+            <div className="flex justify-start">
+              <div className="bg-gray-800 border border-gray-700/50 rounded-lg px-4 py-2.5 text-sm text-gray-500 flex items-center gap-2">
+                <svg className="w-3.5 h-3.5 animate-spin text-teal-500" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="60" strokeDashoffset="15" /></svg>
+                Generating...
+              </div>
+            </div>
+          )}
           <div ref={messagesEndRef} />
         </div>
       </div>
