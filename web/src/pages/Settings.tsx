@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api, type AppSettings } from '../api/client'
+import { api } from '../api/client'
 
 export default function SettingsPage() {
   const queryClient = useQueryClient()

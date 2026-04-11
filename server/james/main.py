@@ -43,7 +43,6 @@ class ModelDownloadRequest(BaseModel):
 
 class ModelLoadRequest(BaseModel):
     model_config = {"protected_namespaces": ()}
-    model_id: str
     ctx_size: int = settings.default_ctx_size
     flash_attn: str = settings.default_flash_attn
     cache_type_k: str = settings.default_cache_type_k
@@ -277,6 +276,8 @@ async def list_models():
                 "name": m.name,
                 "hf_id": m.hf_id,
                 "backend": m.backend,
+                "gguf_file": m.gguf_file,
+                "mlx_path": m.mlx_path,
                 "quantization": m.quantization,
                 "size_gb": m.size_gb,
                 "memory_gb": m.memory_gb,
@@ -399,16 +400,31 @@ async def download_model(request: ModelDownloadRequest):
         size_gb = None
         if downloaded_path.is_file():
             size_gb = round(downloaded_path.stat().st_size / (1024**3), 2)
+        elif downloaded_path.is_dir():
+            # For MLX: sum all files in the directory
+            total_bytes = sum(f.stat().st_size for f in downloaded_path.rglob("*") if f.is_file())
+            size_gb = round(total_bytes / (1024**3), 2)
 
         # Generate model ID
         model_id = request.hf_id.replace("/", "__")
         if request.filename:
-            model_id += f"__{request.filename}"
+            # For GGUF: include the filename for uniqueness
+            stem = Path(request.filename).stem
+            if stem.endswith(".gguf"):
+                stem = stem[:-5]
+            model_id = stem  # Use the GGUF filename stem (e.g. "gemma-4-26B-A4B-it-UD-Q4_K_M")
+
+        # Generate display name
+        if request.filename:
+            name = request.filename
+        else:
+            # For MLX: use the repo name
+            name = request.hf_id.split("/")[-1] if "/" in request.hf_id else request.hf_id
 
         # Save to registry
         model = Model(
             id=model_id,
-            name=request.filename or request.hf_id,
+            name=name,
             hf_id=request.hf_id,
             backend=backend,
             gguf_file=gguf_file,
@@ -804,7 +820,7 @@ async def search_hf(q: str = "", limit: int = 20):
 
 @app.get("/api/hf/model/{model_id:path}")
 async def get_hf_model(model_id: str):
-    """Get details for a HuggingFace model."""
+    """Get rich details for a HuggingFace model."""
     if not hf_client:
         raise HTTPException(500, "HuggingFace client not initialized")
 
@@ -812,13 +828,21 @@ async def get_hf_model(model_id: str):
     if not details:
         raise HTTPException(404, f"Model {model_id} not found on HuggingFace")
 
-    gguf_files = hf_client.list_gguf_files(model_id)
-    mlx_versions = hf_client.list_mlx_files(model_id)
+    # If this model has a GGUF variant repo, fetch those files too
+    gguf_repo_files = []
+    if details.get("gguf_repo_id"):
+        gguf_repo_files = hf_client.list_gguf_files(details["gguf_repo_id"])
+
+    # If there's an MLX variant repo, fetch its details
+    mlx_details = None
+    if details.get("mlx_repo_id"):
+        mlx_details = hf_client.get_model_details(details["mlx_repo_id"])
 
     return {
         **details,
-        "gguf_files": gguf_files,
-        "mlx_versions": mlx_versions,
+        "gguf_repo_files": gguf_repo_files,
+        "mlx_details": mlx_details,
+        "models_dir": str(settings.models_dir),
     }
 
 
@@ -1030,6 +1054,7 @@ async def get_settings():
         "default_cache_type_v": settings.default_cache_type_v,
         "default_gpu_layers": settings.default_gpu_layers,
         "default_n_parallel": settings.default_n_parallel,
+        "models_dir": str(settings.models_dir),
     }
 
 

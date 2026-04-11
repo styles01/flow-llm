@@ -58,27 +58,139 @@ class HuggingFaceClient:
         return results
 
     def get_model_details(self, model_id: str) -> Optional[dict]:
-        """Get details about a specific model."""
+        """Get rich details about a model including description, files, and sizes."""
         try:
             model_info = self.api.model_info(model_id)
             siblings = []
             if model_info.siblings:
                 siblings = [s.rfilename for s in model_info.siblings]
 
+            # Categorize files
+            gguf_files = []
+            model_weight_files = []
+            tokenizer_files = []
+            config_files = []
+            other_files = []
+            total_size_bytes = 0
+
+            for s in (model_info.siblings or []):
+                size = s.size or 0
+                total_size_bytes += size
+                name = s.rfilename
+
+                if name.endswith(".gguf"):
+                    gguf_files.append({
+                        "filename": name,
+                        "size_bytes": size,
+                        "size_gb": round(size / (1024**3), 2) if size else None,
+                        "quantization": self._extract_quant(name),
+                    })
+                elif name.endswith((".safetensors", ".bin", ".pt")):
+                    model_weight_files.append({
+                        "filename": name,
+                        "size_bytes": size,
+                        "size_gb": round(size / (1024**3), 2) if size else None,
+                    })
+                elif name in ("tokenizer.json", "tokenizer_config.json", "tokenizer.model",
+                              "special_tokens_map.json", "vocab.json", "merges.txt",
+                              "chat_template.jinja", "tokenizers.json"):
+                    tokenizer_files.append({
+                        "filename": name,
+                        "size_bytes": size,
+                        "size_gb": round(size / (1024**3), 2) if size else None,
+                    })
+                elif name in ("config.json", "generation_config.json", "model.config.json",
+                              "params.json", "quantize_config.json"):
+                    config_files.append({
+                        "filename": name,
+                        "size_bytes": size,
+                        "size_gb": round(size / (1024**3), 2) if size else None,
+                    })
+                else:
+                    other_files.append({
+                        "filename": name,
+                        "size_bytes": size,
+                        "size_gb": round(size / (1024**3), 2) if size else None,
+                    })
+
+            # Sort GGUF by quality (best first)
+            gguf_files.sort(key=lambda f: self._quant_rank(f.get("quantization", "")))
+
+            # Get model card / description
+            description = None
+            try:
+                from huggingface_hub import ModelCard
+                card = ModelCard.load(model_id)
+                # Get first 500 chars of the card, strip markdown formatting
+                card_text = card.text[:2000] if card.text else None
+                description = card_text
+            except Exception:
+                pass
+
+            # Determine if this is an MLX model
+            is_mlx = any("mlx" in tag.lower() for tag in (model_info.tags or []))
+
+            # Tags
+            tags = list(model_info.tags) if model_info.tags else []
+            architecture = None
+            license_info = None
+            languages = []
+            for tag in tags:
+                if tag.startswith("base_model:"):
+                    architecture = tag.replace("base_model:", "")
+                if tag.startswith("license:"):
+                    license_info = tag.replace("license:", "")
+                if tag.startswith("language:"):
+                    languages.append(tag.replace("language:", ""))
+
+            # Check for GGUF variants (separate repos with -GGUF suffix)
+            gguf_repo_id = None
+            try:
+                gguf_repo_id = f"{model_info.author or model_info.id.split('/')[0]}/{model_info.id.split('/')[-1]}-GGUF"
+                self.api.model_info(gguf_repo_id)
+            except Exception:
+                gguf_repo_id = None
+
+            # Check for MLX variants
+            mlx_repo_id = None
+            if not is_mlx:
+                # Try common MLX naming patterns
+                base_name = model_info.id.split("/")[-1] if "/" in model_info.id else model_info.id
+                for prefix in ["mlx-community", "mlx"]:
+                    try:
+                        candidate = f"{prefix}/{base_name}"
+                        self.api.model_info(candidate)
+                        mlx_repo_id = candidate
+                        break
+                    except Exception:
+                        continue
+
             return {
                 "id": model_info.id,
                 "author": model_info.author,
                 "downloads": model_info.downloads,
-                "tags": list(model_info.tags) if model_info.tags else [],
+                "description": description,
+                "tags": tags,
                 "pipeline_tag": model_info.pipeline_tag,
                 "library_name": getattr(model_info, "library_name", None),
-                "siblings": siblings,
-                "has_gguf": any(f.endswith(".gguf") for f in siblings),
-                "has_mlx": any("mlx" in f.lower() for f in siblings),
+                "license": license_info,
+                "languages": languages,
+                "total_size_bytes": total_size_bytes,
+                "total_size_gb": round(total_size_bytes / (1024**3), 2) if total_size_bytes else None,
+                "file_count": len(siblings),
+                "has_gguf": len(gguf_files) > 0,
+                "has_mlx": is_mlx,
                 "has_chat_template": any(
                     f in siblings
                     for f in ["tokenizer_config.json", "chat_template.jinja"]
                 ),
+                "gguf_files": gguf_files,
+                "model_weights": model_weight_files,
+                "tokenizer_files": tokenizer_files,
+                "config_files": config_files,
+                "other_files": other_files,
+                "gguf_repo_id": gguf_repo_id,
+                "mlx_repo_id": mlx_repo_id,
             }
         except Exception as e:
             logger.error(f"Failed to get model details for {model_id}: {e}")

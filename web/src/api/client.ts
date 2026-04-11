@@ -28,6 +28,8 @@ export interface ModelInfo {
   name: string;
   hf_id: string | null;
   backend: string;
+  gguf_file: string | null;
+  mlx_path: string | null;
   quantization: string | null;
   size_gb: number | null;
   memory_gb: number | null;
@@ -63,14 +65,41 @@ export interface GGUFFile {
   size_gb: number | null;
 }
 
+export interface RepoFile {
+  filename: string;
+  size_bytes: number;
+  size_gb: number | null;
+}
+
 export interface HFModelDetails {
   id: string;
+  author: string | null;
+  downloads: number;
+  description: string | null;
+  tags: string[];
+  pipeline_tag: string | null;
+  library_name: string | null;
+  license: string | null;
+  languages: string[];
+  total_size_bytes: number;
+  total_size_gb: number | null;
+  file_count: number;
   has_gguf: boolean;
   has_mlx: boolean;
   has_chat_template: boolean;
   gguf_files: GGUFFile[];
-  mlx_versions: { mlx_id: string; available: boolean }[];
+  model_weights: RepoFile[];
+  tokenizer_files: RepoFile[];
+  config_files: RepoFile[];
+  other_files: RepoFile[];
+  gguf_repo_id: string | null;
+  mlx_repo_id: string | null;
+  gguf_repo_files: GGUFFile[];
+  mlx_details: HFModelDetails | null;
+  models_dir: string;
+  // Legacy fields kept for compatibility
   siblings: string[];
+  mlx_versions: { mlx_id: string; available: boolean }[];
 }
 
 export interface TelemetryRecord {
@@ -93,6 +122,7 @@ export interface AppSettings {
   default_cache_type_v: string
   default_gpu_layers: number
   default_n_parallel: number
+  models_dir: string
 }
 
 export const api = {
@@ -108,7 +138,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ hf_id: hfId, filename, local_dir: localDir }),
     }),
-  loadModel: (id: string, opts?: { ctx_size?: number; flash_attn?: string; cache_type_k?: string; cache_type_v?: string }) =>
+  loadModel: (id: string, opts?: { ctx_size?: number; flash_attn?: string; cache_type_k?: string; cache_type_v?: string; gpu_layers?: number; n_parallel?: number }) =>
     fetchAPI<{ model_id: string; status: string; port: number; base_url: string }>(`/models/${encodeURIComponent(id)}/load`, {
       method: 'POST',
       body: JSON.stringify(opts || {}),

@@ -3,6 +3,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, type HFSearchResult, type GGUFFile, type ModelInfo } from '../api/client'
 import { LoadDialog } from '../components/LoadDialog'
 
+function formatSize(bytes: number | null, gb: number | null): string {
+  if (gb && gb >= 1) return `${gb} GB`
+  if (bytes) return `${(bytes / (1024 * 1024)).toFixed(0)} MB`
+  return '—'
+}
+
 export default function ModelsPage() {
   const queryClient = useQueryClient()
   const [searchQuery, setSearchQuery] = useState('')
@@ -12,6 +18,8 @@ export default function ModelsPage() {
   const [loadDialogModel, setLoadDialogModel] = useState<ModelInfo | null>(null)
   const [registerPath, setRegisterPath] = useState('')
   const [registerName, setRegisterName] = useState('')
+  const [externalUrl, setExternalUrl] = useState('')
+  const [activeTab, setActiveTab] = useState<'gguf' | 'mlx' | 'files'>('gguf')
 
   // Local models
   const { data: models = [], isLoading: modelsLoading } = useQuery({
@@ -22,11 +30,14 @@ export default function ModelsPage() {
   // Search HuggingFace
   const searchHF = useMutation({
     mutationFn: (q: string) => api.searchHF(q),
-    onSuccess: (data) => setSearchResults(data.results),
+    onSuccess: (data) => {
+      setSearchResults(data.results)
+      setSelectedModel(null)
+    },
   })
 
   // HF model details
-  const { data: hfDetails } = useQuery({
+  const { data: hfDetails, isLoading: hfLoading } = useQuery({
     queryKey: ['hfModel', selectedModel],
     queryFn: () => api.getHFModel(selectedModel!),
     enabled: !!selectedModel,
@@ -38,6 +49,9 @@ export default function ModelsPage() {
       api.downloadModel(hfId, filename),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['models'] })
+      setDownloading(null)
+    },
+    onError: () => {
       setDownloading(null)
     },
   })
@@ -61,7 +75,6 @@ export default function ModelsPage() {
   })
 
   // Connect external model
-  const [externalUrl, setExternalUrl] = useState('')
   const connectMut = useMutation({
     mutationFn: () => api.connectExternal(externalUrl),
     onSuccess: () => {
@@ -85,6 +98,27 @@ export default function ModelsPage() {
     },
   })
 
+  // Determine which GGUF files to show (from this repo or the GGUF variant repo)
+  const ggufFiles = hfDetails?.gguf_files?.length
+    ? hfDetails.gguf_files
+    : hfDetails?.gguf_repo_files?.length
+      ? hfDetails.gguf_repo_files
+      : []
+
+  const hasMlx = hfDetails?.has_mlx || !!hfDetails?.mlx_repo_id
+  const mlxDetails = hfDetails?.mlx_details
+
+  const handleDownloadGGUF = (hfId: string, filename: string) => {
+    setDownloading(filename)
+    downloadMut.mutate({ hfId, filename })
+  }
+
+  const handleDownloadMLX = (hfId: string) => {
+    const name = hfId.split('/').pop() || hfId
+    setDownloading(name)
+    downloadMut.mutate({ hfId })
+  }
+
   return (
     <div className="p-6 max-w-6xl">
       <div className="flex items-center justify-between mb-6">
@@ -104,14 +138,14 @@ export default function ModelsPage() {
       <section className="mb-6 bg-gray-900 border border-gray-800 rounded-lg p-4">
         <h3 className="text-sm font-semibold text-gray-300 mb-3">Register Existing Model</h3>
         <p className="text-xs text-gray-500 mb-3">
-          Already have a GGUF file on disk? Register it here (e.g. your external SSD models).
+          Already have a GGUF file on disk? Register it here.
         </p>
         <div className="flex gap-2">
           <input
             type="text"
             value={registerPath}
             onChange={e => setRegisterPath(e.target.value)}
-            placeholder="/Volumes/James4TBSSD/llms/model-name/model-Q4_K_M.gguf"
+            placeholder="/Volumes/James4TBSSD/llms/model-Q4_K_M.gguf"
             className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           />
           <input
@@ -192,6 +226,9 @@ export default function ModelsPage() {
                     {m.template_valid === true && <span className="text-green-400">template ok</span>}
                     {m.supports_tools && <span className="text-green-400">tools</span>}
                   </div>
+                  {(m.gguf_file || m.mlx_path) && (
+                    <p className="text-xs text-gray-600 mt-0.5 truncate font-mono">{m.gguf_file || m.mlx_path}</p>
+                  )}
                 </div>
                 <div className="flex gap-2 ml-4">
                   {m.status === 'running' ? (
@@ -233,14 +270,14 @@ export default function ModelsPage() {
 
       {/* HuggingFace search */}
       <section>
-        <h3 className="text-lg font-semibold mb-3 text-gray-300">Search HuggingFace</h3>
+        <h3 className="text-lg font-semibold mb-3 text-gray-300">Download from HuggingFace</h3>
         <div className="flex gap-2 mb-4">
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && searchHF.mutate(searchQuery)}
-            placeholder="Search models (e.g. gemma-4, qwen3, llama-4)..."
+            placeholder="Search models (e.g. Qwen3.5, gemma-4, llama-4)..."
             className="flex-1 px-4 py-2 bg-gray-900 border border-gray-700 rounded-md text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           />
           <button
@@ -255,7 +292,7 @@ export default function ModelsPage() {
         {searchHF.isPending && <p className="text-gray-500">Searching...</p>}
 
         {searchResults.length > 0 && (
-          <div className="space-y-2 max-h-96 overflow-y-auto">
+          <div className="space-y-1 max-h-64 overflow-y-auto mb-4">
             {searchResults.map((r) => (
               <div
                 key={r.id}
@@ -266,72 +303,263 @@ export default function ModelsPage() {
                     : 'bg-gray-900 border-gray-800 hover:border-gray-600'
                 }`}
               >
-                <div>
-                  <p className="font-medium text-sm">{r.id}</p>
+                <div className="min-w-0">
+                  <p className="font-medium text-sm truncate">{r.id}</p>
                   <div className="flex gap-2 text-xs text-gray-500 mt-0.5">
                     {r.downloads && <span>{(r.downloads / 1000).toFixed(0)}K downloads</span>}
                     {r.pipeline_tag && <span>{r.pipeline_tag}</span>}
                   </div>
                 </div>
+                <svg className="w-4 h-4 text-gray-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
               </div>
             ))}
           </div>
         )}
 
-        {/* Model detail / download */}
+        {/* Model detail card */}
+        {selectedModel && hfLoading && (
+          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 text-center">
+            <p className="text-gray-400">Loading model details...</p>
+          </div>
+        )}
+
         {hfDetails && (
-          <div className="mt-4 bg-gray-900 border border-gray-800 rounded-lg p-4">
-            <h4 className="font-semibold mb-2">{selectedModel}</h4>
-            <div className="flex gap-4 text-sm text-gray-400 mb-4">
-              {hfDetails.has_gguf && <span className="text-blue-400">GGUF available</span>}
-              {hfDetails.has_mlx && <span className="text-purple-400">MLX available</span>}
-              {hfDetails.has_chat_template && <span className="text-green-400">Chat template</span>}
+          <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+            {/* Header */}
+            <div className="p-4 border-b border-gray-800">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h4 className="text-lg font-semibold">{hfDetails.id}</h4>
+                  {hfDetails.author && <p className="text-sm text-gray-400">by {hfDetails.author}</p>}
+                </div>
+                <div className="flex gap-2">
+                  {hfDetails.has_gguf && <span className="px-2 py-1 bg-blue-900/50 text-blue-300 rounded text-xs font-mono">GGUF</span>}
+                  {hfDetails.has_mlx && <span className="px-2 py-1 bg-purple-900/50 text-purple-300 rounded text-xs font-mono">MLX</span>}
+                  {hfDetails.has_chat_template && <span className="px-2 py-1 bg-green-900/50 text-green-300 rounded text-xs font-mono">Chat Template</span>}
+                </div>
+              </div>
+
+              {/* Stats row */}
+              <div className="flex gap-4 mt-2 text-sm text-gray-400">
+                {hfDetails.downloads && <span>{(hfDetails.downloads / 1000).toFixed(0)}K downloads</span>}
+                {hfDetails.total_size_gb && <span>{hfDetails.total_size_gb} GB total</span>}
+                <span>{hfDetails.file_count} files</span>
+                {hfDetails.pipeline_tag && <span>{hfDetails.pipeline_tag}</span>}
+              </div>
+
+              {/* Description */}
+              {hfDetails.description && (
+                <p className="mt-3 text-sm text-gray-300 line-clamp-4">{hfDetails.description}</p>
+              )}
+
+              {/* Tags */}
+              {hfDetails.tags && hfDetails.tags.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-3">
+                  {hfDetails.tags.filter(t => !t.startsWith('base_model:') && !t.startsWith('license:') && !t.startsWith('language:')).slice(0, 12).map((tag) => (
+                    <span key={tag} className="px-1.5 py-0.5 bg-gray-800 text-gray-400 rounded text-xs">{tag}</span>
+                  ))}
+                </div>
+              )}
+
+              {/* Download destination */}
+              {hfDetails.models_dir && (
+                <div className="mt-3 flex items-center gap-2 text-xs text-gray-500">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                  </svg>
+                  <span>Saves to: <span className="font-mono text-gray-400">{hfDetails.models_dir}/</span></span>
+                </div>
+              )}
             </div>
 
-            {hfDetails.gguf_files.length > 0 && (
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-gray-300 mb-2">GGUF Files:</p>
-                <div className="max-h-48 overflow-y-auto">
-                  {hfDetails.gguf_files.map((f: GGUFFile) => (
-                    <div key={f.filename} className="flex items-center justify-between py-1.5 px-3 bg-gray-800 rounded mb-1">
-                      <div className="text-sm min-w-0">
-                        <span className="font-mono text-xs truncate block">{f.filename}</span>
-                        {f.size_gb && <span className="text-gray-500 text-xs">{f.size_gb} GB</span>}
+            {/* Tabs */}
+            <div className="flex border-b border-gray-800">
+              {ggufFiles.length > 0 && (
+                <button
+                  onClick={() => setActiveTab('gguf')}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                    activeTab === 'gguf' ? 'border-blue-400 text-blue-300' : 'border-transparent text-gray-400 hover:text-gray-300'
+                  }`}
+                >
+                  GGUF Files ({ggufFiles.length})
+                </button>
+              )}
+              {hasMlx && (
+                <button
+                  onClick={() => setActiveTab('mlx')}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                    activeTab === 'mlx' ? 'border-purple-400 text-purple-300' : 'border-transparent text-gray-400 hover:text-gray-300'
+                  }`}
+                >
+                  MLX
+                </button>
+              )}
+              <button
+                onClick={() => setActiveTab('files')}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === 'files' ? 'border-gray-400 text-gray-200' : 'border-transparent text-gray-400 hover:text-gray-300'
+                }`}
+              >
+                All Files ({hfDetails.file_count})
+              </button>
+            </div>
+
+            {/* Tab content */}
+            <div className="p-4">
+              {/* GGUF tab */}
+              {activeTab === 'gguf' && ggufFiles.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-sm text-gray-400 mb-2">
+                    Choose a quantization level. Higher = better quality, larger file.
+                  </p>
+                  {ggufFiles.map((f: GGUFFile) => (
+                    <div key={f.filename} className="flex items-center justify-between py-2 px-3 bg-gray-800 rounded">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-mono text-sm truncate">{f.filename}</p>
+                        <div className="flex gap-3 text-xs text-gray-400 mt-0.5">
+                          {f.quantization && <span className="text-blue-300">{f.quantization}</span>}
+                          {f.size_gb && <span>{f.size_gb} GB</span>}
+                        </div>
                       </div>
                       <button
-                        onClick={() => {
-                          setDownloading(f.filename)
-                          downloadMut.mutate({ hfId: selectedModel!, filename: f.filename })
-                        }}
+                        onClick={() => handleDownloadGGUF(
+                          hfDetails.gguf_repo_id || hfDetails.id,
+                          f.filename
+                        )}
                         disabled={downloading === f.filename}
-                        className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 rounded text-xs font-medium ml-3 whitespace-nowrap"
+                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 rounded text-sm font-medium ml-3 whitespace-nowrap"
                       >
                         {downloading === f.filename ? 'Downloading...' : 'Download'}
                       </button>
                     </div>
                   ))}
+                  {hfDetails.gguf_repo_id && (
+                    <p className="text-xs text-gray-500 mt-2">
+                      GGUF files from <span className="font-mono">{hfDetails.gguf_repo_id}</span>
+                    </p>
+                  )}
                 </div>
-              </div>
-            )}
+              )}
 
-            {hfDetails.mlx_versions.length > 0 && (
-              <div className="mt-3">
-                <p className="text-sm font-medium text-gray-300 mb-2">MLX Version:</p>
-                {hfDetails.mlx_versions.map((v: { mlx_id: string; available: boolean }) => (
-                  <button
-                    key={v.mlx_id}
-                    onClick={() => {
-                      setDownloading(v.mlx_id)
-                      downloadMut.mutate({ hfId: v.mlx_id })
-                    }}
-                    disabled={downloading === v.mlx_id}
-                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-700 rounded text-sm font-medium"
-                  >
-                    {downloading === v.mlx_id ? 'Downloading...' : `Download ${v.mlx_id}`}
-                  </button>
-                ))}
-              </div>
-            )}
+              {/* MLX tab */}
+              {activeTab === 'mlx' && hasMlx && (
+                <div>
+                  {mlxDetails ? (
+                    <div>
+                      <div className="flex items-center justify-between mb-3">
+                        <div>
+                          <p className="font-semibold text-purple-300">{mlxDetails.id}</p>
+                          <div className="flex gap-3 text-sm text-gray-400 mt-1">
+                            <span>{mlxDetails.file_count} files</span>
+                            {mlxDetails.total_size_gb && <span>{mlxDetails.total_size_gb} GB</span>}
+                            {mlxDetails.has_chat_template && <span className="text-green-400">chat template</span>}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleDownloadMLX(mlxDetails.id)}
+                          disabled={downloading !== null}
+                          className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-700 rounded-md text-sm font-medium"
+                        >
+                          {downloading === mlxDetails.id.split('/').pop() ? 'Downloading...' : 'Download MLX Model'}
+                        </button>
+                      </div>
+                      <p className="text-xs text-gray-500 mb-3">
+                        Downloads the entire model directory (weights, tokenizer, config) for Apple Silicon MLX inference.
+                      </p>
+                      {/* Show file breakdown */}
+                      {mlxDetails.model_weights.length > 0 && (
+                        <div className="space-y-1">
+                          <p className="text-xs text-gray-400 font-medium">Model Weights</p>
+                          {mlxDetails.model_weights.slice(0, 5).map((f) => (
+                            <div key={f.filename} className="flex justify-between text-xs text-gray-400 py-0.5">
+                              <span className="font-mono truncate">{f.filename}</span>
+                              {f.size_gb && <span className="ml-2 shrink-0">{f.size_gb} GB</span>}
+                            </div>
+                          ))}
+                          {mlxDetails.model_weights.length > 5 && (
+                            <p className="text-xs text-gray-500">+ {mlxDetails.model_weights.length - 5} more weight files</p>
+                          )}
+                          {mlxDetails.tokenizer_files.length > 0 && (
+                            <p className="text-xs text-gray-400 mt-1">
+                              + {mlxDetails.tokenizer_files.length} tokenizer file{mlxDetails.tokenizer_files.length > 1 ? 's' : ''}
+                              {mlxDetails.config_files.length > 0 && `, ${mlxDetails.config_files.length} config file${mlxDetails.config_files.length > 1 ? 's' : ''}`}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="text-sm text-gray-400 mb-2">
+                        MLX version available at <span className="font-mono text-purple-300">{hfDetails.mlx_repo_id}</span>
+                      </p>
+                      <button
+                        onClick={() => handleDownloadMLX(hfDetails.mlx_repo_id!)}
+                        disabled={downloading !== null}
+                        className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-700 rounded-md text-sm font-medium"
+                      >
+                        {downloading ? 'Downloading...' : 'Download MLX Model'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Files tab */}
+              {activeTab === 'files' && (
+                <div className="space-y-1 max-h-80 overflow-y-auto">
+                  {hfDetails.model_weights.length > 0 && (
+                    <div className="mb-3">
+                      <p className="text-xs text-gray-400 font-medium mb-1">Model Weights ({hfDetails.model_weights.length})</p>
+                      {hfDetails.model_weights.map((f) => (
+                        <div key={f.filename} className="flex justify-between text-xs text-gray-300 py-0.5">
+                          <span className="font-mono truncate">{f.filename}</span>
+                          <span className="ml-2 shrink-0 text-gray-500">{formatSize(f.size_bytes, f.size_gb)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {hfDetails.tokenizer_files.length > 0 && (
+                    <div className="mb-3">
+                      <p className="text-xs text-gray-400 font-medium mb-1">Tokenizer ({hfDetails.tokenizer_files.length})</p>
+                      {hfDetails.tokenizer_files.map((f) => (
+                        <div key={f.filename} className="flex justify-between text-xs text-gray-300 py-0.5">
+                          <span className="font-mono truncate">{f.filename}</span>
+                          <span className="ml-2 shrink-0 text-gray-500">{formatSize(f.size_bytes, f.size_gb)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {hfDetails.config_files.length > 0 && (
+                    <div className="mb-3">
+                      <p className="text-xs text-gray-400 font-medium mb-1">Config ({hfDetails.config_files.length})</p>
+                      {hfDetails.config_files.map((f) => (
+                        <div key={f.filename} className="flex justify-between text-xs text-gray-300 py-0.5">
+                          <span className="font-mono truncate">{f.filename}</span>
+                          <span className="ml-2 shrink-0 text-gray-500">{formatSize(f.size_bytes, f.size_gb)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {hfDetails.other_files.length > 0 && (
+                    <div>
+                      <p className="text-xs text-gray-400 font-medium mb-1">Other ({hfDetails.other_files.length})</p>
+                      {hfDetails.other_files.slice(0, 20).map((f) => (
+                        <div key={f.filename} className="flex justify-between text-xs text-gray-300 py-0.5">
+                          <span className="font-mono truncate">{f.filename}</span>
+                          <span className="ml-2 shrink-0 text-gray-500">{formatSize(f.size_bytes, f.size_gb)}</span>
+                        </div>
+                      ))}
+                      {hfDetails.other_files.length > 20 && (
+                        <p className="text-xs text-gray-500">+ {hfDetails.other_files.length - 20} more files</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </section>
