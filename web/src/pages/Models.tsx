@@ -166,10 +166,10 @@ export default function ModelsPage() {
       </section>
 
       {/* Connect running model */}
-      <section className="mb-6 bg-gray-900 border border-green-900/40 rounded-lg p-4">
-        <h3 className="text-sm font-semibold text-green-300 mb-3">Connect Running Model</h3>
+      <section className="mb-6 bg-gray-900 border border-fuchsia-900/30 rounded-lg p-4">
+        <h3 className="text-sm font-semibold text-fuchsia-300 mb-3">Connect Running Model</h3>
         <p className="text-xs text-gray-500 mb-3">
-          Already have a llama-server or MLX backend running? Connect JAMES to it without restarting.
+          Already have a llama-server or MLX backend running? Connect Flow to it without restarting.
         </p>
         <div className="flex gap-2">
           <input
@@ -177,12 +177,12 @@ export default function ModelsPage() {
             value={externalUrl}
             onChange={e => setExternalUrl(e.target.value)}
             placeholder="http://127.0.0.1:8081"
-            className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-green-500"
+            className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-fuchsia-500"
           />
           <button
             onClick={() => connectMut.mutate()}
             disabled={!externalUrl.trim() || connectMut.isPending}
-            className="px-4 py-2 bg-green-600 hover:bg-green-500 disabled:bg-gray-700 disabled:text-gray-500 rounded-md text-sm font-medium"
+            className="px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-500 disabled:bg-gray-700 disabled:text-gray-500 rounded-md text-sm font-medium"
           >
             {connectMut.isPending ? 'Connecting...' : 'Connect'}
           </button>
@@ -256,7 +256,7 @@ export default function ModelsPage() {
                   {m.status !== 'running' && (
                     <button
                       onClick={() => { if (confirm(`Delete ${m.name}?`)) deleteMut.mutate(m.id) }}
-                      className="px-3 py-1.5 bg-red-900/50 hover:bg-red-800 text-red-300 rounded-md text-sm"
+                      className="px-3 py-1.5 bg-fuchsia-900/40 hover:bg-fuchsia-800 text-fuchsia-300 rounded-md text-sm"
                     >
                       Delete
                     </button>
@@ -293,28 +293,37 @@ export default function ModelsPage() {
 
         {searchResults.length > 0 && (
           <div className="space-y-1 max-h-64 overflow-y-auto mb-4">
-            {searchResults.map((r) => (
-              <div
-                key={r.id}
-                onClick={() => setSelectedModel(r.id)}
-                className={`cursor-pointer flex items-center justify-between p-3 rounded-lg border transition-colors ${
-                  selectedModel === r.id
-                    ? 'bg-gray-800 border-teal-500'
-                    : 'bg-gray-900 border-gray-800 hover:border-gray-600'
-                }`}
-              >
-                <div className="min-w-0">
-                  <p className="font-medium text-sm truncate">{r.id}</p>
-                  <div className="flex gap-2 text-xs text-gray-500 mt-0.5">
-                    {r.downloads && <span>{(r.downloads / 1000).toFixed(0)}K downloads</span>}
-                    {r.pipeline_tag && <span>{r.pipeline_tag}</span>}
+            {searchResults.map((r) => {
+              const tags = r.tags || []
+              const isInstruct = tags.some(t => t === 'instruct' || t.includes('instruct'))
+              const isVision = tags.some(t => t === 'vision' || t.includes('vision'))
+              const isMlx = tags.some(t => t === 'mlx' || t.includes('mlx'))
+              return (
+                <div
+                  key={r.id}
+                  onClick={() => setSelectedModel(r.id)}
+                  className={`cursor-pointer flex items-center justify-between p-3 rounded-lg border transition-colors ${
+                    selectedModel === r.id
+                      ? 'bg-gray-800 border-teal-500'
+                      : 'bg-gray-900 border-gray-800 hover:border-gray-600'
+                  }`}
+                >
+                  <div className="min-w-0">
+                    <p className="font-medium text-sm truncate">{r.id}</p>
+                    <div className="flex gap-1.5 items-center mt-0.5">
+                      {r.downloads && <span className="text-xs text-gray-500">{(r.downloads / 1000).toFixed(0)}K</span>}
+                      {r.pipeline_tag && <span className="text-xs text-gray-500">{r.pipeline_tag}</span>}
+                      {isInstruct && <span className="px-1 py-0.5 bg-teal-900/50 text-teal-300 rounded text-[10px] font-mono">instruct</span>}
+                      {isVision && <span className="px-1 py-0.5 bg-fuchsia-900/50 text-fuchsia-300 rounded text-[10px] font-mono">vision</span>}
+                      {isMlx && <span className="px-1 py-0.5 bg-purple-900/50 text-purple-300 rounded text-[10px] font-mono">mlx</span>}
+                    </div>
                   </div>
-                </div>
-                <svg className="w-4 h-4 text-gray-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  <svg className="w-4 h-4 text-gray-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                 </svg>
               </div>
-            ))}
+              )
+            })}
           </div>
         )}
 
@@ -333,6 +342,15 @@ export default function ModelsPage() {
                 <div>
                   <h4 className="text-lg font-semibold">{hfDetails.id}</h4>
                   {hfDetails.author && <p className="text-sm text-gray-400">by {hfDetails.author}</p>}
+                  <a
+                    href={`https://huggingface.co/${hfDetails.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs text-teal-400 hover:text-teal-300 mt-1"
+                  >
+                    View on HuggingFace
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                  </a>
                 </div>
                 <div className="flex gap-2">
                   {hfDetails.has_gguf && <span className="px-2 py-1 bg-blue-900/50 text-blue-300 rounded text-xs font-mono">GGUF</span>}

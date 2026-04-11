@@ -49,7 +49,7 @@ export default function RunningPage() {
           <div className="mt-3">
             <div className="w-full bg-gray-800 rounded-full h-3">
               <div
-                className="bg-teal-600 h-3 rounded-full transition-all"
+                className="bg-gradient-to-r from-teal-500 to-fuchsia-500 h-3 rounded-full transition-all"
                 style={{ width: `${(hw.memory_used_gb / hw.memory_total_gb) * 100}%` }}
               />
             </div>
@@ -68,7 +68,7 @@ export default function RunningPage() {
       ) : (
         <div className="space-y-3">
           {models.map((m) => (
-            <div key={m.model_id} className="bg-gray-900 border border-green-800/50 rounded-lg p-4">
+            <div key={m.model_id} className="bg-gray-900 border border-teal-800/50 rounded-lg p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-2">
@@ -91,7 +91,7 @@ export default function RunningPage() {
                     Open UI
                   </a>
                   <button
-                    className="px-3 py-1.5 bg-red-900/50 hover:bg-red-800 text-red-300 rounded-md text-sm"
+                    className="px-3 py-1.5 bg-fuchsia-900/40 hover:bg-fuchsia-800 text-fuchsia-300 rounded-md text-sm"
                   >
                     Unload
                   </button>
