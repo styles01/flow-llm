@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ModelsPage from './pages/Models'
 import RunningPage from './pages/Running'
 import ChatPage from './pages/Chat'
+import LogsPage from './pages/Logs'
 import TelemetryPage from './pages/Telemetry'
 import SettingsPage from './pages/Settings'
 import { ToastProvider } from './components/Toast'
@@ -26,6 +27,7 @@ function App() {
               <Route path="/" element={<ModelsPage />} />
               <Route path="/running" element={<RunningPage />} />
               <Route path="/chat" element={<ChatPage />} />
+              <Route path="/logs" element={<LogsPage />} />
               <Route path="/telemetry" element={<TelemetryPage />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Routes>

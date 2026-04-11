@@ -1,5 +1,51 @@
 # Changelog
 
+## 2026-04-12
+
+### Chat: Fix Gemma Responses Being Swallowed
+- **Added `reasoning_content` support** — Gemma 4 (via llama-server) sends thinking tokens in `delta.reasoning_content` instead of `delta.content`. The streaming parser was only reading `content`, causing ALL of Gemma's thinking to be silently dropped. Now both `content` and `reasoning_content` are accumulated separately and displayed correctly — thinking as a collapsible block, response text as the main bubble.
+- **Added `reasoningContent` field to Message type** — assistant messages can now carry a separate `reasoningContent` string for models that use the `reasoning_content` SSE field.
+- **Fixed over-aggressive control token stripping** — The regex `/<[a-z_]+>/g` was removing ANY lowercase HTML-like tag, eating Gemma's `<start_of_turn>`, `<end_of_turn>`, and other structural markers that might wrap content. Replaced with targeted removal of known control tokens only.
+- **Handle unclosed `<|think|>` blocks** — If a model opens a think tag but never closes it (streaming cutoff, model stop), the content after it is now treated as thinking content instead of showing raw `<|think|>` tags.
+- **Auto-expand thinking when no visible text** — If a response has thinking but no text content, thinking blocks auto-expand and show "No visible response text" hint instead of appearing as a blank bubble.
+- **Fixed streaming telemetry** — Three bugs: `input_tokens` was set to `max_tokens` (output limit) instead of actual prompt tokens; `output_tokens` counted SSE deltas instead of actual tokens; `tokens_per_sec` was never computed for streaming. Now extracts `usage` from SSE chunks and calculates metrics correctly.
+
+### Session State Persistence
+- **Created ephemeral session store** (`web/src/store/sessionStore.ts`) — in-memory store using `useSyncExternalStore` that survives route changes but is gone on page refresh. Chat messages, selected model, system prompt, log lines, and other session state persist when navigating between pages.
+- **Chat and Logs pages now retain state** across navigation — switching between Chat and Logs no longer resets messages, model selection, or log history.
+
+### Chat Processing Progress
+- **Added processing progress indicator in Chat** — when a model is processing a prompt (prefill phase), a progress bar with percentage appears inline in the chat before tokens start streaming. Polls `/api/processing-progress` every 500ms while streaming.
+- **Added "Generating..." indicator** — when streaming is active but no processing progress is reported (tokens already flowing), a small spinner with "Generating..." appears inline.
+- **Processing progress clears automatically** once tokens start flowing in the stream.
+- **Backend: stderr progress monitoring** — `BackendProcess._monitor_stderr()` now parses `llama_progress` and `prefill` patterns from backend stderr, updates `_processing_progress` dict, and broadcasts progress via WebSocket.
+- **Backend: stdout monitoring** — Added `_monitor_stdout()` thread to capture stdout lines from backend processes.
+- **Backend: `/api/processing-progress` endpoint** — Returns processing progress for all currently processing models.
+- **Backend: progress reset on request** — `reset_processing_progress()` called at start of chat completions, progress cleared in stream `finally` block.
+
+### Logs Page
+- **Added Logs page** for backend debugging — terminal-style log viewer with auto-scroll, polls `/api/logs` every 1s.
+- **Model filter** — dropdown to filter logs by specific running model or view all.
+- **Auto-scroll toggle** — checkbox to auto-scroll to newest logs, can be disabled to browse history.
+- **Log level coloring** — errors/failures in red, warnings in amber, info/loaded in teal, debug in gray.
+- **Status bar** — shows line count and polling interval.
+- **Sidebar nav** — added "Logs" item with text-line icon between Chat and Telemetry.
+- **Backend: log buffer** — rotating deque (2000 lines per model) captures both stdout and stderr from backend processes via `append_log()` / `get_logs()`.
+- **Backend: `/api/logs` endpoint** — returns recent log lines with optional `model_id` filter and `lines` count parameter.
+
+### Files Created (2026-04-12)
+- `web/src/store/sessionStore.ts`
+- `web/src/pages/Logs.tsx`
+
+### Files Modified (2026-04-12)
+- `web/src/pages/Chat.tsx` — processing progress, generating indicator, session store
+- `web/src/pages/Logs.tsx` — session store for log persistence across navigation
+- `web/src/App.tsx` — added Logs route
+- `web/src/components/Sidebar.tsx` — added Logs nav item with icon
+- `web/src/api/client.ts` — added `getProcessingProgress()` and `getLogs()` endpoints
+- `server/james/process_manager.py` — log buffer, `append_log()`, `get_logs()`, stdout monitor
+- `server/james/main.py` — `/api/logs` and `/api/processing-progress` endpoints
+
 ## 2026-04-11
 
 ### Brand & Visual Identity

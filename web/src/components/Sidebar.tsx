@@ -25,6 +25,11 @@ const icons = {
       <path d="M6 8h2M10 8h4" />
     </svg>
   ),
+  logs: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 5h8M3 9h14M3 13h10M3 17h6" />
+    </svg>
+  ),
   telemetry: (
     <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 15l4-5 3 3 4-7 3 4" />
@@ -44,6 +49,7 @@ const navItems = [
   { to: '/', label: 'Models', icon: icons.models, badge: null as string | null },
   { to: '/running', label: 'Instances', icon: icons.instances, badge: 'running' as const },
   { to: '/chat', label: 'Chat', icon: icons.chat, badge: null as string | null },
+  { to: '/logs', label: 'Logs', icon: icons.logs, badge: null as string | null },
   { to: '/telemetry', label: 'Telemetry', icon: icons.telemetry, badge: null as string | null },
   { to: '/settings', label: 'Settings', icon: icons.settings, badge: null as string | null },
 ]

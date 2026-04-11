@@ -4,6 +4,7 @@ import asyncio
 import logging
 import re
 import subprocess
+from collections import deque
 from pathlib import Path
 from typing import Optional
 
@@ -16,6 +17,10 @@ logger = logging.getLogger(__name__)
 # Progress tracking for model processing (prefill/generation)
 _processing_progress: dict[str, float] = {}  # model_id -> progress (0.0-1.0)
 
+# Log buffer for backend processes (rotating buffer, max 2000 lines per model)
+_log_buffers: dict[str, deque[str]] = {}
+_MAX_LOG_LINES = 2000
+
 
 def get_processing_progress(model_id: str) -> Optional[float]:
     """Get the processing progress for a model (0.0 to 1.0), or None if not processing."""
@@ -25,6 +30,27 @@ def get_processing_progress(model_id: str) -> Optional[float]:
 def reset_processing_progress(model_id: str):
     """Reset processing progress for a model (call when a new request starts)."""
     _processing_progress[model_id] = 0.0
+
+
+def append_log(model_id: str, line: str):
+    """Append a log line to the rotating buffer for a model."""
+    if model_id not in _log_buffers:
+        _log_buffers[model_id] = deque(maxlen=_MAX_LOG_LINES)
+    _log_buffers[model_id].append(line)
+
+
+def get_logs(model_id: str = None, lines: int = 200) -> list[str]:
+    """Get recent log lines. If model_id is None, returns all logs merged by timestamp.
+    If model_id is specified, returns only that model's logs."""
+    if model_id:
+        buf = _log_buffers.get(model_id, deque())
+        return list(buf)[-lines:]
+    # Merge all model logs
+    all_logs = []
+    for mid, buf in _log_buffers.items():
+        for line in buf:
+            all_logs.append(f"[{mid}] {line}")
+    return all_logs[-lines:]
 
 
 class BackendProcess:
@@ -85,6 +111,8 @@ class BackendProcess:
                 text = line.decode(errors='replace').strip()
                 if not text:
                     continue
+                # Store in log buffer
+                append_log(self.model_id, text)
                 logger.debug(f"[{self.model_id}] stderr: {text}")
                 # llama-server prefill progress: "llama_progress: 0.42" or "prefill: 42%"
                 m = re.search(r'(?:llama_progress|prefill)[:\s]+(\d+\.?\d*)', text, re.IGNORECASE)
@@ -114,6 +142,21 @@ class BackendProcess:
         finally:
             # Clean up progress when process exits
             _processing_progress.pop(self.model_id, None)
+
+    def _monitor_stdout(self):
+        """Read stdout from the backend process and store in log buffer."""
+        if not self.process or not self.process.stdout:
+            return
+        try:
+            for line in iter(self.process.stdout.readline, b''):
+                if not line:
+                    break
+                text = line.decode(errors='replace').strip()
+                if not text:
+                    continue
+                append_log(self.model_id, text)
+        except Exception as e:
+            logger.debug(f"stdout monitor for {self.model_id} ended: {e}")
 
     def build_command(self) -> list[str]:
         """Build the command to start the backend process."""
@@ -185,6 +228,9 @@ class BackendProcess:
             import threading
             monitor = threading.Thread(target=self._monitor_stderr, daemon=True)
             monitor.start()
+            # Start stdout monitor in background thread
+            stdout_monitor = threading.Thread(target=self._monitor_stdout, daemon=True)
+            stdout_monitor.start()
 
             # Wait briefly and check if process died immediately
             await asyncio.sleep(2)

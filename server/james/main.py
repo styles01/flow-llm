@@ -1146,6 +1146,14 @@ async def processing_progress():
     return {"progress": progress}
 
 
+@app.get("/api/logs")
+async def get_logs(model_id: Optional[str] = None, lines: int = 200):
+    """Get recent backend process logs."""
+    from james.process_manager import get_logs as get_pm_logs
+    logs = get_pm_logs(model_id=model_id, lines=min(lines, 2000))
+    return {"logs": logs}
+
+
 # --- Serve frontend ---
 
 

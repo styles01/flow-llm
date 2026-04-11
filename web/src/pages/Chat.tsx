@@ -1,13 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api, type TelemetryRecord } from '../api/client'
+import { api } from '../api/client'
 import { formatError } from '../utils/errors'
-
-interface Message {
-  role: 'system' | 'user' | 'assistant'
-  content: string
-  isError?: boolean
-}
+import { useSession, chatActions, type Message } from '../store/sessionStore'
 
 type ContentSegment =
   | { type: 'thinking'; content: string }
@@ -144,7 +139,7 @@ function MessageBubble({ message }: { message: Message }) {
     )
   }
 
-  // Assistant message — parse thinking blocks
+  // Assistant message — parse thinking blocks from content and reasoningContent
   const segments = parseThinkingBlocks(message.content)
   const thinkingSegments = segments.filter(s => s.type === 'thinking')
   const textSegments = segments.filter(s => s.type === 'text').map(s => ({
@@ -152,13 +147,21 @@ function MessageBubble({ message }: { message: Message }) {
     content: stripControlTokens(s.content),
   })).filter(s => s.content.length > 0)
 
+  // reasoningContent (Gemma 4 via delta.reasoning_content) is separate from content
+  const hasReasoning = !!message.reasoningContent
+
   return (
     <div className="flex justify-start">
       <div className="max-w-[85%]">
+        {/* Reasoning content from reasoning_content field (Gemma 4, etc.) */}
+        {hasReasoning && (
+          <ThinkingBlock content={message.reasoningContent!} defaultExpanded={textSegments.length === 0} />
+        )}
+        {/* Thinking blocks parsed from content (Qwen, Claude-style tags) */}
         {thinkingSegments.length > 0 && (
-          <div className={textSegments.length > 0 ? 'mb-1' : ''}>
+          <div className={(textSegments.length > 0 || hasReasoning) ? 'mb-1' : ''}>
             {thinkingSegments.map((s, i) => (
-              <ThinkingBlock key={i} content={s.content} defaultExpanded={textSegments.length === 0} />
+              <ThinkingBlock key={i} content={s.content} defaultExpanded={textSegments.length === 0 && !hasReasoning} />
             ))}
           </div>
         )}
@@ -168,7 +171,7 @@ function MessageBubble({ message }: { message: Message }) {
               <span key={i}>{s.content}{i < textSegments.length - 1 ? '\n\n' : ''}</span>
             ))}
           </div>
-        ) : thinkingSegments.length > 0 ? (
+        ) : (thinkingSegments.length > 0 || hasReasoning) ? (
           <p className="text-xs text-gray-600 italic pl-3">No visible response text</p>
         ) : null}
       </div>
@@ -180,15 +183,10 @@ export default function ChatPage() {
   const queryClient = useQueryClient()
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const [systemPrompt, setSystemPrompt] = useState('You are a helpful assistant.')
+  const session = useSession()
+  const { messages, selectedModel, systemPrompt, includeTools, streaming, lastTelemetry, processingProgress } = session
   const [userMessage, setUserMessage] = useState('')
-  const [messages, setMessages] = useState<Message[]>([])
-  const [streaming, setStreaming] = useState(false)
-  const [includeTools, setIncludeTools] = useState(false)
-  const [selectedModel, setSelectedModel] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
-  const [lastTelemetry, setLastTelemetry] = useState<TelemetryRecord | null>(null)
-  const [processingProgress, setProcessingProgress] = useState<number | null>(null)
 
   const { data: models = [] } = useQuery({
     queryKey: ['models'],
@@ -228,7 +226,7 @@ export default function ChatPage() {
   // Poll processing progress while streaming
   useEffect(() => {
     if (!streaming || !selectedModel) {
-      setProcessingProgress(null)
+      chatActions.setProcessingProgress(null)
       return
     }
     const interval = setInterval(async () => {
@@ -236,7 +234,7 @@ export default function ChatPage() {
         const data = await api.getProcessingProgress()
         const p = data.progress[selectedModel]
         if (p != null && p > 0) {
-          setProcessingProgress(p)
+          chatActions.setProcessingProgress(p)
         }
       } catch {}
     }, 500)
@@ -246,16 +244,16 @@ export default function ChatPage() {
   async function sendMessage() {
     if (!userMessage.trim() || !canSend) return
     setError(null)
-    setLastTelemetry(null)
+    chatActions.setLastTelemetry(null)
 
     const newMessages: Message[] = [
       { role: 'system', content: systemPrompt },
       ...messages,
       { role: 'user', content: userMessage },
     ]
-    setMessages(newMessages)
+    chatActions.setMessages(newMessages)
     setUserMessage('')
-    setStreaming(true)
+    chatActions.setStreaming(true)
 
     const tools = includeTools ? [{
       type: 'function',
@@ -292,9 +290,12 @@ export default function ChatPage() {
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let assistantContent = ''
+      let reasoningContent = ''
       let buffer = ''
 
-      setMessages(prev => [...prev, { role: 'assistant', content: '' }])
+      // Set the initial empty assistant message
+      const baseMessages = [...newMessages, { role: 'assistant' as const, content: '' }]
+      chatActions.setMessages(baseMessages)
 
       while (true) {
         const { done, value } = await reader.read()
@@ -312,16 +313,26 @@ export default function ChatPage() {
 
             try {
               const parsed = JSON.parse(data)
-              const delta = parsed.choices?.[0]?.delta?.content
-              if (delta) {
-                assistantContent += delta
-                // Clear processing progress once tokens start flowing
-                if (processingProgress !== null) setProcessingProgress(null)
-                setMessages(prev => {
-                  const updated = [...prev]
-                  updated[updated.length - 1] = { role: 'assistant', content: assistantContent }
-                  return updated
-                })
+              const delta = parsed.choices?.[0]?.delta
+              // Handle reasoning_content (Gemma 4, Qwen 3, DeepSeek thinking tokens)
+              const reasoning = delta?.reasoning_content
+              if (reasoning) {
+                reasoningContent += reasoning
+                chatActions.setProcessingProgress(null)
+              }
+              // Handle regular content
+              const content = delta?.content
+              if (content) {
+                assistantContent += content
+                chatActions.setProcessingProgress(null)
+              }
+              // Update message if we got any content
+              if (reasoning || content) {
+                chatActions.setMessages([...newMessages, {
+                  role: 'assistant',
+                  content: assistantContent,
+                  ...(reasoningContent ? { reasoningContent } : {}),
+                }])
               }
             } catch {}
           }
@@ -333,15 +344,15 @@ export default function ChatPage() {
         await new Promise(r => setTimeout(r, 300))
         const telData = await api.getTelemetry(selectedModel)
         if (telData.records && telData.records.length > 0) {
-          setLastTelemetry(telData.records[0])
+          chatActions.setLastTelemetry(telData.records[0])
         }
       } catch {}
     } catch (err: any) {
       const errMsg = formatError(err)
       setError(errMsg)
-      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${errMsg}`, isError: true }])
+      chatActions.setMessages([...newMessages, { role: 'assistant', content: `Error: ${errMsg}`, isError: true }])
     } finally {
-      setStreaming(false)
+      chatActions.setStreaming(false)
     }
   }
 
@@ -352,7 +363,7 @@ export default function ChatPage() {
         <div className="flex items-center gap-3 max-w-4xl mx-auto">
           <select
             value={selectedModel}
-            onChange={(e) => { setSelectedModel(e.target.value); setError(null) }}
+            onChange={(e) => { chatActions.setSelectedModel(e.target.value); setError(null) }}
             className="flex-1 px-3 py-2 bg-gray-900 border border-gray-700 rounded-md text-white text-sm"
           >
             <option value="">Select a model...</option>
@@ -367,7 +378,7 @@ export default function ChatPage() {
             <input
               type="checkbox"
               checked={includeTools}
-              onChange={(e) => setIncludeTools(e.target.checked)}
+              onChange={(e) => chatActions.setIncludeTools(e.target.checked)}
               className="rounded"
             />
             Tools
@@ -375,7 +386,7 @@ export default function ChatPage() {
 
           {messages.length > 0 && (
             <button
-              onClick={() => { setMessages([]); setError(null); setLastTelemetry(null) }}
+              onClick={() => { chatActions.clearChat(); setError(null) }}
               className="px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-md text-xs text-gray-400 hover:text-white transition-colors shrink-0"
             >
               Clear
@@ -492,7 +503,7 @@ export default function ChatPage() {
             </summary>
             <textarea
               value={systemPrompt}
-              onChange={(e) => setSystemPrompt(e.target.value)}
+              onChange={(e) => chatActions.setSystemPrompt(e.target.value)}
               className="w-full mt-1 px-3 py-2 bg-gray-900 border border-gray-700 rounded-md text-white font-mono text-xs h-20 resize-y focus:outline-none focus:ring-2 focus:ring-teal-500"
             />
           </details>

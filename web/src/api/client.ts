@@ -194,5 +194,11 @@ export const api = {
   getProcessingProgress: () => fetchAPI<{ progress: Record<string, number> }>('/processing-progress'),
 
   // Backend logs
-  getLogs: (lines?: number) => fetchAPI<{ logs: string[] }>(`/logs${lines ? `?lines=${lines}` : ''}`),
+  getLogs: (lines?: number, modelId?: string) => {
+    const params = new URLSearchParams()
+    if (lines) params.set('lines', String(lines))
+    if (modelId) params.set('model_id', modelId)
+    const qs = params.toString()
+    return fetchAPI<{ logs: string[] }>(`/logs${qs ? `?${qs}` : ''}`)
+  },
 };
