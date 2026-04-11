@@ -43,12 +43,20 @@ class ModelDownloadRequest(BaseModel):
 
 class ModelLoadRequest(BaseModel):
     model_config = {"protected_namespaces": ()}
+    # GGUF (llama.cpp) params
     ctx_size: int = settings.default_ctx_size
     flash_attn: str = settings.default_flash_attn
     cache_type_k: str = settings.default_cache_type_k
     cache_type_v: str = settings.default_cache_type_v
     gpu_layers: int = settings.default_gpu_layers
     n_parallel: int = settings.default_n_parallel
+    # MLX (mlx-openai-server) params
+    mlx_context_length: int = 0  # 0 = model default
+    mlx_prompt_cache_size: int = 10
+    mlx_enable_auto_tool_choice: bool = False
+    mlx_reasoning_parser: str = ""
+    mlx_chat_template_file: str = ""
+    mlx_trust_remote_code: bool = False
 
 
 class ModelUnloadRequest(BaseModel):
@@ -745,6 +753,12 @@ async def load_model(model_id: str, request: ModelLoadRequest):
                 cache_type_v=request.cache_type_v,
                 gpu_layers=request.gpu_layers,
                 n_parallel=request.n_parallel,
+                mlx_context_length=request.mlx_context_length,
+                mlx_prompt_cache_size=request.mlx_prompt_cache_size,
+                mlx_enable_auto_tool_choice=request.mlx_enable_auto_tool_choice,
+                mlx_reasoning_parser=request.mlx_reasoning_parser,
+                mlx_chat_template_file=request.mlx_chat_template_file,
+                mlx_trust_remote_code=request.mlx_trust_remote_code,
             )
 
             model.status = "running"
@@ -905,8 +919,12 @@ async def chat_completions(request: dict):
     to the correct backend process, collects telemetry, and streams
     responses transparently — no prompt modification.
     """
+    from james.process_manager import reset_processing_progress, _processing_progress
     model_name = request.get("model", "")
     proc = process_manager.get_process(model_name)
+
+    # Reset processing progress for this model
+    reset_processing_progress(model_name)
 
     if not proc:
         raise HTTPException(404, f"Model '{model_name}' is not loaded. Available: {list(process_manager.get_all_processes().keys())}")
@@ -919,6 +937,8 @@ async def chat_completions(request: dict):
         async def stream_with_metrics():
             first_token_time = None
             total_output_tokens = 0
+            input_tokens = None
+            output_tokens_from_usage = None
             client = httpx.AsyncClient(timeout=300.0)
             try:
                 async with client.stream(
@@ -936,6 +956,14 @@ async def chat_completions(request: dict):
                             try:
                                 import json
                                 chunk = json.loads(data)
+                                # Count output tokens from usage if available
+                                usage = chunk.get("usage")
+                                if usage:
+                                    if usage.get("prompt_tokens"):
+                                        input_tokens = usage["prompt_tokens"]
+                                    if usage.get("completion_tokens"):
+                                        output_tokens_from_usage = usage["completion_tokens"]
+                                # Track first token time from content deltas
                                 if chunk.get("choices") and chunk["choices"][0].get("delta", {}).get("content"):
                                     if first_token_time is None:
                                         first_token_time = time.monotonic()
@@ -949,15 +977,20 @@ async def chat_completions(request: dict):
                             yield line + "\n"
             finally:
                 await client.aclose()
-
-            # Record telemetry
+                # Clear processing progress
+                _processing_progress.pop(model_name, None)
+            end_time = time.monotonic()
             ttft_ms = (first_token_time - start_time) * 1000 if first_token_time else None
+            elapsed_sec = (end_time - start_time) if first_token_time else None
+            final_output_tokens = output_tokens_from_usage or (total_output_tokens if total_output_tokens else None)
+            tokens_per_sec = (final_output_tokens / elapsed_sec) if final_output_tokens and elapsed_sec and elapsed_sec > 0 else None
             await _record_telemetry(
                 model_id=model_name,
                 backend=proc.backend,
                 ttft_ms=ttft_ms,
-                input_tokens=request.get("max_tokens"),
-                output_tokens=total_output_tokens if total_output_tokens else None,
+                input_tokens=input_tokens,
+                output_tokens=final_output_tokens,
+                tokens_per_sec=tokens_per_sec,
             )
 
         return StreamingResponse(
@@ -1098,6 +1131,19 @@ async def health():
         "running_models": len(running),
         "models": list(running.keys()),
     }
+
+
+@app.get("/api/processing-progress")
+async def processing_progress():
+    """Get processing progress for all models currently processing."""
+    from james.process_manager import get_processing_progress
+    running = process_manager.get_all_processes()
+    progress = {}
+    for model_id in running:
+        p = get_processing_progress(model_id)
+        if p is not None:
+            progress[model_id] = p
+    return {"progress": progress}
 
 
 # --- Serve frontend ---

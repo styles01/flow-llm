@@ -80,3 +80,10 @@
   0%, 100% { d: path("M0 16 Q8 4, 16 16 Q24 28, 32 16"); }
   50%      { d: path("M0 16 Q8 28, 16 16 Q24 4, 32 16"); }
 }
+
+/* Indeterminate progress bar */
+@keyframes pulse-bar {
+  0%   { transform: translateX(-100%); }
+  50%  { transform: translateX(150%); }
+  100% { transform: translateX(-100%); }
+}

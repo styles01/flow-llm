@@ -15,21 +15,16 @@ type ContentSegment =
 
 // Strip model control tokens that shouldn't be displayed
 function stripControlTokens(text: string): string {
-  // Remove self-closing control tokens like <|end|>, <|channel|>, <|eot_id|>, etc.
-  let cleaned = text.replace(/<\|[a-z_]+\|>/g, '')
-  // Remove <im_end>, <im_sep> and similar
-  cleaned = cleaned.replace(/<[a-z_]+>/g, (match) => {
-    // Keep HTML-like tags that are valid (thinking, etc. handled elsewhere)
-    if (match === '<thinking>' || match === '</thinking>') return match
-    return ''
-  })
-  // Remove any remaining special token markers
-  cleaned = cleaned.replace(/\[\/?INST\]/g, '')
-  cleaned = cleaned.replace(/<\|\/?([a-z_]+)\|>/g, (full, tag) => {
-    // Keep think tags (handled by thinking block parser)
+  // Remove pipe-delimited control tokens: <|end|>, <|channel|>, <|eot_id|>, </|think|>, etc.
+  // But keep <|think|> and </|think|> (handled by thinking block parser)
+  let cleaned = text.replace(/<\|\/?([a-z_0-9]+)\|>/g, (full, tag) => {
     if (tag === 'think' || tag === '/think') return full
     return ''
   })
+  // Remove known non-pipe control tokens: <start_of_turn>, <end_of_turn>, <im_end>, <im_sep>
+  cleaned = cleaned.replace(/<\/?(?:start_of_turn|end_of_turn|im_end|im_sep)>/g, '')
+  // Remove [INST] and [/INST] markers
+  cleaned = cleaned.replace(/\[\/?INST\]/g, '')
   return cleaned.trim()
 }
 
@@ -45,13 +40,31 @@ function parseThinkingBlocks(content: string): ContentSegment[] {
     regions.push({ start: match.index, end: match.index + match[0].length, content: match[1].trim() })
   }
 
+  // Handle UNCLOSED <|think|> (Gemma may not close the tag if streaming stopped)
+  // Only check if no closed thinking blocks were found for Gemma style
+  if (regions.length === 0 || regions.every(r => {
+    // Check if there's an unclosed <|think|> after the last closed region
+    const afterLast = content.slice(r.end)
+    return !/<\|think\|>/.test(afterLast)
+  })) {
+    const unclosedRe = /<\|think\|>([\s\S]+)$/g
+    let unclosedMatch: RegExpExecArray | null
+    while ((unclosedMatch = unclosedRe.exec(content)) !== null) {
+      // Make sure this isn't already covered by a closed region
+      const isAlreadyCovered = regions.some(r => unclosedMatch!.index >= r.start && unclosedMatch!.index < r.end)
+      if (!isAlreadyCovered && unclosedMatch![1].trim()) {
+        regions.push({ start: unclosedMatch!.index, end: content.length, content: unclosedMatch![1].trim() })
+      }
+    }
+  }
+
   // Claude-style: <thinking>...</thinking>
   const re2 = /<thinking>([\s\S]*?)<\/thinking>/g
   while ((match = re2.exec(content)) !== null) {
     regions.push({ start: match.index, end: match.index + match[0].length, content: match[1].trim() })
   }
 
-  // Qwen 3 / DeepSeek R1: <think>...</think>
+  // Qwen 3 / DeepSeek R1: think_start...<\/think>
   const re3 = /<think>([\s\S]*?)<\/think>/g
   while ((match = re3.exec(content)) !== null) {
     regions.push({ start: match.index, end: match.index + match[0].length, content: match[1].trim() })
@@ -83,8 +96,9 @@ function parseThinkingBlocks(content: string): ContentSegment[] {
   return segments
 }
 
-function ThinkingBlock({ content }: { content: string }) {
-  const [expanded, setExpanded] = useState(false)
+
+function ThinkingBlock({ content, defaultExpanded = false }: { content: string; defaultExpanded?: boolean }) {
+  const [expanded, setExpanded] = useState(defaultExpanded)
   const preview = content.length > 120 ? content.slice(0, 120) + '...' : content
   return (
     <details className="my-1">
@@ -142,19 +156,21 @@ function MessageBubble({ message }: { message: Message }) {
     <div className="flex justify-start">
       <div className="max-w-[85%]">
         {thinkingSegments.length > 0 && (
-          <div className="mb-1">
+          <div className={textSegments.length > 0 ? 'mb-1' : ''}>
             {thinkingSegments.map((s, i) => (
-              <ThinkingBlock key={i} content={s.content} />
+              <ThinkingBlock key={i} content={s.content} defaultExpanded={textSegments.length === 0} />
             ))}
           </div>
         )}
-        {textSegments.length > 0 && (
+        {textSegments.length > 0 ? (
           <div className="bg-gray-800 border border-gray-700/50 rounded-lg px-4 py-2.5 text-sm text-gray-200 whitespace-pre-wrap">
             {textSegments.map((s, i) => (
               <span key={i}>{s.content}{i < textSegments.length - 1 ? '\n\n' : ''}</span>
             ))}
           </div>
-        )}
+        ) : thinkingSegments.length > 0 ? (
+          <p className="text-xs text-gray-600 italic pl-3">No visible response text</p>
+        ) : null}
       </div>
     </div>
   )
@@ -172,6 +188,7 @@ export default function ChatPage() {
   const [selectedModel, setSelectedModel] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
   const [lastTelemetry, setLastTelemetry] = useState<TelemetryRecord | null>(null)
+  const [processingProgress, setProcessingProgress] = useState<number | null>(null)
 
   const { data: models = [] } = useQuery({
     queryKey: ['models'],
@@ -207,6 +224,24 @@ export default function ChatPage() {
       textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 150) + 'px'
     }
   }, [userMessage])
+
+  // Poll processing progress while streaming
+  useEffect(() => {
+    if (!streaming || !selectedModel) {
+      setProcessingProgress(null)
+      return
+    }
+    const interval = setInterval(async () => {
+      try {
+        const data = await api.getProcessingProgress()
+        const p = data.progress[selectedModel]
+        if (p != null && p > 0) {
+          setProcessingProgress(p)
+        }
+      } catch {}
+    }, 500)
+    return () => clearInterval(interval)
+  }, [streaming, selectedModel])
 
   async function sendMessage() {
     if (!userMessage.trim() || !canSend) return
@@ -280,6 +315,8 @@ export default function ChatPage() {
               const delta = parsed.choices?.[0]?.delta?.content
               if (delta) {
                 assistantContent += delta
+                // Clear processing progress once tokens start flowing
+                if (processingProgress !== null) setProcessingProgress(null)
                 setMessages(prev => {
                   const updated = [...prev]
                   updated[updated.length - 1] = { role: 'assistant', content: assistantContent }
@@ -291,8 +328,9 @@ export default function ChatPage() {
         }
       }
 
-      // After streaming completes, fetch telemetry
+      // After streaming completes, fetch telemetry (small delay to let backend commit)
       try {
+        await new Promise(r => setTimeout(r, 300))
         const telData = await api.getTelemetry(selectedModel)
         if (telData.records && telData.records.length > 0) {
           setLastTelemetry(telData.records[0])

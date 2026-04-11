@@ -48,11 +48,22 @@ const navItems = [
   { to: '/settings', label: 'Settings', icon: icons.settings, badge: null as string | null },
 ]
 
+const LogoIcon = ({ size }: { size: 'sm' | 'lg' }) => (
+  <svg className={size === 'sm' ? 'w-5 h-5' : 'w-7 h-7'} viewBox="0 0 32 32" fill="none">
+    <line x1="1" y1="8" x2="31" y2="8" stroke="#5eead4" strokeWidth="0.15" opacity="0.15"/>
+    <line x1="1" y1="24" x2="31" y2="24" stroke="#5eead4" strokeWidth="0.15" opacity="0.15"/>
+    <line x1="1" y1="16" x2="31" y2="16" stroke="#5eead4" strokeWidth="0.5" opacity="0.35"/>
+    <path d="M1 16 H4 V10 H8 V16 H12 V12 H16 V16 H20 V8 H24 V16 H28 V14 H31" stroke="#2dd4bf" strokeWidth="1.5" strokeMiterlimit="miter"/>
+    <path d="M1 16 H4 V22 H8 V16 H12 V20 H16 V16 H20 V24 H24 V16 H28 V18 H31" stroke="#e879f9" strokeWidth="1.5" strokeMiterlimit="miter" opacity="0.8"/>
+  </svg>
+)
+
 export function Sidebar() {
   const [collapsed, setCollapsed] = useState(() => {
     const saved = localStorage.getItem('flow.sidebar_collapsed')
     return saved === 'true'
   })
+  const [mobileOpen, setMobileOpen] = useState(false)
 
   // Fetch running models count for badge
   const { data: runningData } = useQuery({
@@ -67,22 +78,59 @@ export function Sidebar() {
     localStorage.setItem('flow.sidebar_collapsed', String(collapsed))
   }, [collapsed])
 
+  // Close mobile sidebar on route change
+  const closeMobile = () => setMobileOpen(false)
+
   return (
-    <nav className={`${collapsed ? 'w-14' : 'w-56'} bg-gray-900 border-r border-gray-800 flex flex-col transition-all duration-200 ease-out`}>
+    <>
+      {/* Mobile top bar */}
+      <div className="md:hidden fixed top-0 left-0 right-0 z-40 h-12 bg-gray-900 border-b border-gray-800 flex items-center px-4 gap-3">
+        <button
+          onClick={() => setMobileOpen(true)}
+          className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+          aria-label="Open navigation"
+        >
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+        <LogoIcon size="sm" />
+        <span className="text-lg font-bold text-white">Flow</span>
+      </div>
+
+      {/* Mobile overlay */}
+      {mobileOpen && (
+        <div className="md:hidden fixed inset-0 z-50 flex">
+          <div className="fixed inset-0 bg-black/60" onClick={closeMobile} />
+          <nav className="relative w-64 bg-gray-900 border-r border-gray-800 flex flex-col shadow-2xl osc-glow">
+            <SidebarContent collapsed={false} runningCount={runningCount} onNavClick={closeMobile} />
+          </nav>
+        </div>
+      )}
+
+      {/* Desktop sidebar */}
+      <nav className={`hidden md:flex ${collapsed ? 'w-14' : 'w-56'} bg-gray-900 border-r border-gray-800 flex-col transition-all duration-200 ease-out`}>
+        <SidebarContent collapsed={collapsed} runningCount={runningCount} onToggleCollapse={() => setCollapsed(!collapsed)} />
+      </nav>
+
+      {/* Spacer for mobile top bar */}
+      <div className="md:hidden h-12" />
+    </>
+  )
+}
+
+function SidebarContent({ collapsed, runningCount, onToggleCollapse, onNavClick }: {
+  collapsed: boolean
+  runningCount: number
+  onToggleCollapse?: () => void
+  onNavClick?: () => void
+}) {
+  return (
+    <>
       {/* Logo area */}
       <div className={`p-4 border-b border-gray-800 ${collapsed ? 'flex justify-center' : ''}`}>
         <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-2'}`}>
-          <svg className={collapsed ? 'w-5 h-5' : 'w-7 h-7'} viewBox="0 0 32 32" fill="none">
-            {/* Grid lines */}
-            <line x1="1" y1="8" x2="31" y2="8" stroke="#5eead4" strokeWidth="0.15" opacity="0.15"/>
-            <line x1="1" y1="24" x2="31" y2="24" stroke="#5eead4" strokeWidth="0.15" opacity="0.15"/>
-            {/* Center axis */}
-            <line x1="1" y1="16" x2="31" y2="16" stroke="#5eead4" strokeWidth="0.5" opacity="0.35"/>
-            {/* Teal waveform — peaks above center */}
-            <path d="M1 16 H4 V10 H8 V16 H12 V12 H16 V16 H20 V8 H24 V16 H28 V14 H31" stroke="#2dd4bf" strokeWidth="1.5" strokeMiterlimit="miter"/>
-            {/* Magenta waveform — mirror below center */}
-            <path d="M1 16 H4 V22 H8 V16 H12 V20 H16 V16 H20 V24 H24 V16 H28 V18 H31" stroke="#e879f9" strokeWidth="1.5" strokeMiterlimit="miter" opacity="0.8"/>
-          </svg>
+          <LogoIcon size={collapsed ? 'sm' : 'lg'} />
           {!collapsed && (
             <div>
               <h1 className="text-lg font-bold text-white">Flow</h1>
@@ -99,6 +147,7 @@ export function Sidebar() {
             key={item.to}
             to={item.to}
             end={item.to === '/'}
+            onClick={onNavClick}
             className={({ isActive }) => {
               let cls = 'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 relative'
               if (isActive) {
@@ -114,7 +163,6 @@ export function Sidebar() {
           >
             <span className="shrink-0">{item.icon}</span>
             {!collapsed && <span>{item.label}</span>}
-            {/* Badges */}
             {item.badge === 'running' && runningCount > 0 && !collapsed && (
               <span className="ml-auto w-2 h-2 rounded-full bg-green-400 animate-pulse" />
             )}
@@ -126,18 +174,20 @@ export function Sidebar() {
       </div>
 
       {/* Collapse toggle & version */}
-      <div className={`p-4 border-t border-gray-800 flex ${collapsed ? 'justify-center' : 'items-center justify-between'}`}>
-        {!collapsed && <p className="text-xs text-gray-600">v0.1.0</p>}
-        <button
-          onClick={() => setCollapsed(!collapsed)}
-          className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        >
-          <svg className="w-4 h-4 transition-transform" style={{ transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7M18 19l-7-7 7-7" />
-          </svg>
-        </button>
-      </div>
-    </nav>
+      {onToggleCollapse && (
+        <div className={`p-4 border-t border-gray-800 flex ${collapsed ? 'justify-center' : 'items-center justify-between'}`}>
+          {!collapsed && <p className="text-xs text-gray-600">v0.1.0</p>}
+          <button
+            onClick={onToggleCollapse}
+            className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            <svg className="w-4 h-4 transition-transform" style={{ transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7M18 19l-7-7 7-7" />
+            </svg>
+          </button>
+        </div>
+      )}
+    </>
   )
 }

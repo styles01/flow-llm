@@ -5,6 +5,7 @@ import { LoadDialog } from '../components/LoadDialog'
 import { ConfirmationDialog } from '../components/ConfirmationDialog'
 import { EmptyState } from '../components/EmptyState'
 import { useToast } from '../components/Toast'
+import { DownloadProgress } from '../components/DownloadProgress'
 import { formatError } from '../utils/errors'
 
 function formatSize(bytes: number | null, gb: number | null): string {
@@ -26,6 +27,7 @@ export default function ModelsPage() {
   const [externalUrl, setExternalUrl] = useState('')
   const [activeTab, setActiveTab] = useState<'gguf' | 'mlx' | 'files'>('gguf')
   const [deleteTarget, setDeleteTarget] = useState<ModelInfo | null>(null)
+  const [focusedSearchIndex, setFocusedSearchIndex] = useState(-1)
 
   // Local models
   const { data: models = [], isLoading: modelsLoading } = useQuery({
@@ -277,7 +279,14 @@ export default function ModelsPage() {
                       </button>
                       <span className="px-2 py-1.5 text-fuchsia-400 rounded-md text-xs">load failed</span>
                     </>
-                  ) : m.status === 'available' || m.status === 'loading' ? (
+                  ) : m.status === 'loading' ? (
+                    <div className="flex items-center gap-2">
+                      <div className="w-24 bg-bg-elevated rounded-full h-2 overflow-hidden">
+                        <div className="h-2 bg-gradient-to-r from-teal-400 to-fuchsia-400 rounded-full" style={{ animation: 'pulse-bar 2s ease-in-out infinite', width: '40%' }} />
+                      </div>
+                      <span className="text-xs text-teal-300">Loading...</span>
+                    </div>
+                  ) : m.status === 'available' ? (
                     <button
                       onClick={() => setLoadDialogModel(m)}
                       className="px-3 py-1.5 bg-teal-600 hover:bg-teal-500 rounded-md text-sm"
@@ -309,8 +318,23 @@ export default function ModelsPage() {
           <input
             type="text"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && searchHF.mutate(searchQuery)}
+            onChange={(e) => { setSearchQuery(e.target.value); setFocusedSearchIndex(-1) }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && focusedSearchIndex >= 0 && searchResults.length > 0) {
+                setSelectedModel(searchResults[focusedSearchIndex].id)
+              } else if (e.key === 'Enter') {
+                searchHF.mutate(searchQuery)
+              } else if (e.key === 'ArrowDown') {
+                e.preventDefault()
+                setFocusedSearchIndex(i => Math.min(i + 1, searchResults.length - 1))
+              } else if (e.key === 'ArrowUp') {
+                e.preventDefault()
+                setFocusedSearchIndex(i => Math.max(i - 1, -1))
+              } else if (e.key === 'Escape') {
+                setSearchResults([])
+                setFocusedSearchIndex(-1)
+              }
+            }}
             placeholder="Search models (e.g. Qwen3.5, gemma-4, llama-4)..."
             className="flex-1 px-4 py-2 bg-gray-900 border border-gray-700 rounded-md text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-teal-500"
           />
@@ -326,19 +350,24 @@ export default function ModelsPage() {
         {searchHF.isPending && <p className="text-gray-400">Searching...</p>}
 
         {searchResults.length > 0 && (
-          <div className="space-y-1 max-h-64 overflow-y-auto mb-4">
-            {searchResults.map((r) => {
+          <div role="listbox" className="space-y-1 max-h-64 overflow-y-auto mb-4">
+            {searchResults.map((r, idx) => {
               const tags = r.tags || []
               const isInstruct = tags.some(t => t === 'instruct' || t.includes('instruct'))
               const isVision = tags.some(t => t === 'vision' || t.includes('vision'))
               const isMlx = tags.some(t => t === 'mlx' || t.includes('mlx'))
+              const isFocused = focusedSearchIndex === idx
               return (
                 <div
                   key={r.id}
-                  onClick={() => setSelectedModel(r.id)}
+                  role="option"
+                  aria-selected={selectedModel === r.id}
+                  onClick={() => { setSelectedModel(r.id); setFocusedSearchIndex(idx) }}
                   className={`cursor-pointer flex items-center justify-between p-3 rounded-lg border transition-colors ${
                     selectedModel === r.id
                       ? 'bg-gray-800 border-teal-500'
+                      : isFocused
+                      ? 'bg-gray-800 border-teal-400/50 ring-2 ring-teal-400/30'
                       : 'bg-gray-900 border-gray-800 hover:border-gray-600'
                   }`}
                 >
@@ -485,6 +514,12 @@ export default function ModelsPage() {
                       >
                         {downloading === f.filename ? 'Downloading...' : 'Download'}
                       </button>
+                      {downloading === f.filename && (
+                        <DownloadProgress
+                          downloadKey={`${hfDetails.gguf_repo_id || hfDetails.id}/${f.filename}`}
+                          onComplete={() => { setDownloading(null); queryClient.invalidateQueries({ queryKey: ['models'] }) }}
+                        />
+                      )}
                     </div>
                   ))}
                   {hfDetails.gguf_repo_id && (

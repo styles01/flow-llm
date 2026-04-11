@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -11,6 +12,19 @@ from psutil import Process
 from james.config import settings, DEFAULT_LLAMACPP_HOST
 
 logger = logging.getLogger(__name__)
+
+# Progress tracking for model processing (prefill/generation)
+_processing_progress: dict[str, float] = {}  # model_id -> progress (0.0-1.0)
+
+
+def get_processing_progress(model_id: str) -> Optional[float]:
+    """Get the processing progress for a model (0.0 to 1.0), or None if not processing."""
+    return _processing_progress.get(model_id)
+
+
+def reset_processing_progress(model_id: str):
+    """Reset processing progress for a model (call when a new request starts)."""
+    _processing_progress[model_id] = 0.0
 
 
 class BackendProcess:
@@ -22,27 +36,84 @@ class BackendProcess:
         backend: str,
         port: int,
         model_path: str,
+        # GGUF params
         ctx_size: int = settings.default_ctx_size,
         flash_attn: str = settings.default_flash_attn,
         cache_type_k: str = settings.default_cache_type_k,
         cache_type_v: str = settings.default_cache_type_v,
         gpu_layers: int = settings.default_gpu_layers,
         n_parallel: int = settings.default_n_parallel,
+        # MLX params
+        mlx_context_length: int = 0,
+        mlx_prompt_cache_size: int = 10,
+        mlx_enable_auto_tool_choice: bool = False,
+        mlx_reasoning_parser: str = "",
+        mlx_chat_template_file: str = "",
+        mlx_trust_remote_code: bool = False,
         host: str = DEFAULT_LLAMACPP_HOST
     ):
         self.model_id = model_id
         self.backend = backend  # "gguf" or "mlx"
         self.port = port
         self.model_path = model_path
+        # GGUF
         self.ctx_size = ctx_size
         self.flash_attn = flash_attn
         self.cache_type_k = cache_type_k
         self.cache_type_v = cache_type_v
         self.gpu_layers = gpu_layers
         self.n_parallel = n_parallel
+        # MLX
+        self.mlx_context_length = mlx_context_length
+        self.mlx_prompt_cache_size = mlx_prompt_cache_size
+        self.mlx_enable_auto_tool_choice = mlx_enable_auto_tool_choice
+        self.mlx_reasoning_parser = mlx_reasoning_parser
+        self.mlx_chat_template_file = mlx_chat_template_file
+        self.mlx_trust_remote_code = mlx_trust_remote_code
         self.host = host
         self.process: Optional[subprocess.Popen] = None
         self._health_task: Optional[asyncio.Task] = None
+
+    def _monitor_stderr(self):
+        """Read stderr from the backend process and parse progress lines."""
+        if not self.process or not self.process.stderr:
+            return
+        try:
+            for line in iter(self.process.stderr.readline, b''):
+                if not line:
+                    break
+                text = line.decode(errors='replace').strip()
+                if not text:
+                    continue
+                logger.debug(f"[{self.model_id}] stderr: {text}")
+                # llama-server prefill progress: "llama_progress: 0.42" or "prefill: 42%"
+                m = re.search(r'(?:llama_progress|prefill)[:\s]+(\d+\.?\d*)', text, re.IGNORECASE)
+                if m:
+                    val = float(m.group(1))
+                    # Normalize: if > 1, assume it's a percentage (e.g., 42)
+                    progress = val / 100.0 if val > 1.0 else val
+                    _processing_progress[self.model_id] = min(progress, 1.0)
+                    # Broadcast via WebSocket
+                    try:
+                        import asyncio
+                        from james.main import broadcast
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
+                            loop.create_task(broadcast("processing_progress", {
+                                "model_id": self.model_id,
+                                "progress": _processing_progress[self.model_id],
+                            }))
+                    except Exception:
+                        pass
+                # Also detect when processing starts/resets
+                if 'load model' in text.lower() or 'processing' in text.lower():
+                    if self.model_id not in _processing_progress:
+                        _processing_progress[self.model_id] = 0.0
+        except Exception as e:
+            logger.debug(f"stderr monitor for {self.model_id} ended: {e}")
+        finally:
+            # Clean up progress when process exits
+            _processing_progress.pop(self.model_id, None)
 
     def build_command(self) -> list[str]:
         """Build the command to start the backend process."""
@@ -62,7 +133,7 @@ class BackendProcess:
                 "--metrics",
             ]
         elif self.backend == "mlx":
-            return [
+            cmd = [
                 "mlx-openai-server",
                 "launch",
                 "--model-path", self.model_path,
@@ -70,6 +141,19 @@ class BackendProcess:
                 "--host", self.host,
                 "--port", str(self.port),
             ]
+            if self.mlx_context_length > 0:
+                cmd.extend(["--context-length", str(self.mlx_context_length)])
+            if self.mlx_prompt_cache_size > 0:
+                cmd.extend(["--prompt-cache-size", str(self.mlx_prompt_cache_size)])
+            if self.mlx_enable_auto_tool_choice:
+                cmd.append("--enable-auto-tool-choice")
+            if self.mlx_reasoning_parser:
+                cmd.extend(["--reasoning-parser", self.mlx_reasoning_parser])
+            if self.mlx_chat_template_file:
+                cmd.extend(["--chat-template-file", self.mlx_chat_template_file])
+            if self.mlx_trust_remote_code:
+                cmd.append("--trust-remote-code")
+            return cmd
         else:
             raise ValueError(f"Unknown backend: {self.backend}")
 
@@ -97,6 +181,11 @@ class BackendProcess:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
+            # Start stderr monitor in background thread
+            import threading
+            monitor = threading.Thread(target=self._monitor_stderr, daemon=True)
+            monitor.start()
+
             # Wait briefly and check if process died immediately
             await asyncio.sleep(2)
             if self.process.poll() is not None:
@@ -212,12 +301,20 @@ class ProcessManager:
         model_id: str,
         backend: str,
         model_path: str,
+        # GGUF params
         ctx_size: int = settings.default_ctx_size,
         flash_attn: str = settings.default_flash_attn,
         cache_type_k: str = settings.default_cache_type_k,
         cache_type_v: str = settings.default_cache_type_v,
         gpu_layers: int = settings.default_gpu_layers,
         n_parallel: int = settings.default_n_parallel,
+        # MLX params
+        mlx_context_length: int = 0,
+        mlx_prompt_cache_size: int = 10,
+        mlx_enable_auto_tool_choice: bool = False,
+        mlx_reasoning_parser: str = "",
+        mlx_chat_template_file: str = "",
+        mlx_trust_remote_code: bool = False,
     ) -> BackendProcess:
         """Start a model on a backend. Returns the BackendProcess."""
         if model_id in self._processes:
@@ -240,6 +337,12 @@ class ProcessManager:
             cache_type_v=cache_type_v,
             gpu_layers=gpu_layers,
             n_parallel=n_parallel,
+            mlx_context_length=mlx_context_length,
+            mlx_prompt_cache_size=mlx_prompt_cache_size,
+            mlx_enable_auto_tool_choice=mlx_enable_auto_tool_choice,
+            mlx_reasoning_parser=mlx_reasoning_parser,
+            mlx_chat_template_file=mlx_chat_template_file,
+            mlx_trust_remote_code=mlx_trust_remote_code,
         )
 
         try:

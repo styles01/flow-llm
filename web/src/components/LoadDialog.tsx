@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, type ModelInfo } from '../api/client'
 
@@ -9,25 +9,74 @@ interface LoadDialogProps {
 
 export function LoadDialog({ model, onClose }: LoadDialogProps) {
   const queryClient = useQueryClient()
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const isGGUF = model.backend === 'gguf'
+  const isMLX = model.backend === 'mlx'
 
   // Fetch saved defaults
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: () => api.getSettings() })
 
+  // --- GGUF params ---
   const [ctxSize, setCtxSize] = useState(settings?.default_ctx_size ?? 100000)
   const [flashAttn, setFlashAttn] = useState(settings?.default_flash_attn ?? 'on')
   const [cacheTypeK, setCacheTypeK] = useState(settings?.default_cache_type_k ?? 'q4_0')
   const [cacheTypeV, setCacheTypeV] = useState(settings?.default_cache_type_v ?? 'q4_0')
   const [gpuLayers, setGpuLayers] = useState(settings?.default_gpu_layers ?? -1)
   const [nParallel, setNParallel] = useState(settings?.default_n_parallel ?? 2)
+  const [threads, setThreads] = useState(-1)
+  const [batchSize, setBatchSize] = useState(2048)
+  const [mlock, setMlock] = useState(false)
+  const [mmap, setMmap] = useState(true)
+  const [ropeScaling, setRopeScaling] = useState('none')
+  const [ropeScale, setRopeScale] = useState(1.0)
+
+  // --- MLX params ---
+  const [mlxContextLength, setMlxContextLength] = useState(0) // 0 = model default
+  const [promptCacheSize, setPromptCacheSize] = useState(10)
+  const [enableAutoToolChoice, setEnableAutoToolChoice] = useState(false)
+  const [reasoningParser, setReasoningParser] = useState('')
+  const [chatTemplateFile, setChatTemplateFile] = useState('')
+  const [trustRemoteCode, setTrustRemoteCode] = useState(false)
+
+  // --- Common ---
+
+  // Focus trap and Escape handling
+  useEffect(() => {
+    const previousFocus = document.activeElement as HTMLElement
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { onClose(); return }
+      if (e.key === 'Tab' && dialogRef.current) {
+        const focusables = dialogRef.current.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
+        if (focusables.length === 0) return
+        const first = focusables[0] as HTMLElement
+        const last = focusables[focusables.length - 1] as HTMLElement
+        if (e.shiftKey) {
+          if (document.activeElement === first) { e.preventDefault(); last.focus() }
+        } else {
+          if (document.activeElement === last) { e.preventDefault(); first.focus() }
+        }
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => { document.removeEventListener('keydown', handleKeyDown); previousFocus?.focus() }
+  }, [onClose])
 
   const loadMut = useMutation({
     mutationFn: () => api.loadModel(model.id, {
-      ctx_size: ctxSize,
-      flash_attn: flashAttn,
-      cache_type_k: cacheTypeK,
-      cache_type_v: cacheTypeV,
-      gpu_layers: gpuLayers,
-      n_parallel: nParallel,
+      // GGUF params
+      ctx_size: isGGUF ? ctxSize : undefined,
+      flash_attn: isGGUF ? flashAttn : undefined,
+      cache_type_k: isGGUF ? cacheTypeK : undefined,
+      cache_type_v: isGGUF ? cacheTypeV : undefined,
+      gpu_layers: isGGUF ? gpuLayers : undefined,
+      n_parallel: isGGUF ? nParallel : undefined,
+      // MLX params
+      mlx_context_length: isMLX ? mlxContextLength : undefined,
+      mlx_prompt_cache_size: isMLX ? promptCacheSize : undefined,
+      mlx_enable_auto_tool_choice: isMLX ? enableAutoToolChoice : undefined,
+      mlx_reasoning_parser: isMLX ? (reasoningParser || undefined) : undefined,
+      mlx_chat_template_file: isMLX ? (chatTemplateFile || undefined) : undefined,
+      mlx_trust_remote_code: isMLX ? trustRemoteCode : undefined,
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['models'] })
@@ -36,119 +85,322 @@ export function LoadDialog({ model, onClose }: LoadDialogProps) {
     },
   })
 
-  // Calculate effective context
   const effectiveCtx = ctxSize * nParallel
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-[480px] max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <h3 className="text-lg font-bold mb-4">Load Model</h3>
-        <p className="text-sm text-gray-400 mb-4 font-mono">{model.name}</p>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Load model" className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-[min(520px,calc(100vw-2rem))] max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <h3 className="text-lg font-bold mb-1">Load Model</h3>
+        <div className="flex items-center gap-2 mb-4">
+          <p className="text-sm text-gray-400 font-mono">{model.name}</p>
+          <span className={`px-1.5 py-0.5 rounded text-xs ${isGGUF ? 'bg-blue-900/50 text-blue-300' : 'bg-purple-900/50 text-purple-300'}`}>
+            {model.backend.toUpperCase()}
+          </span>
+        </div>
 
         <div className="space-y-4">
-          {/* Context Window */}
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">
-              Context Window (tokens per slot)
-            </label>
-            <input
-              type="number"
-              value={ctxSize}
-              onChange={e => setCtxSize(Number(e.target.value))}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              Effective total: {effectiveCtx.toLocaleString()} tokens ({ctxSize.toLocaleString()} × {nParallel} slots)
-            </p>
-          </div>
+          {isGGUF && (
+            <>
+              {/* Context Window */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">
+                  Context Window (tokens per slot)
+                </label>
+                <input
+                  type="number"
+                  value={ctxSize}
+                  onChange={e => setCtxSize(Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Effective total: {effectiveCtx.toLocaleString()} tokens ({ctxSize.toLocaleString()} × {nParallel} slots)
+                </p>
+              </div>
 
-          {/* Parallel Slots */}
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">
-              Parallel Slots
-            </label>
-            <input
-              type="number"
-              value={nParallel}
-              onChange={e => setNParallel(Number(e.target.value))}
-              min={1}
-              max={4}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              Concurrent request slots for multi-turn agent loops
-            </p>
-          </div>
+              {/* Parallel Slots */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">
+                  Parallel Slots
+                </label>
+                <input
+                  type="number"
+                  value={nParallel}
+                  onChange={e => setNParallel(Number(e.target.value))}
+                  min={1}
+                  max={4}
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Concurrent request slots for multi-turn agent loops
+                </p>
+              </div>
 
-          {/* Flash Attention */}
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">
-              Flash Attention
-            </label>
-            <select
-              value={flashAttn}
-              onChange={e => setFlashAttn(e.target.value)}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
-            >
-              <option value="on">On (recommended)</option>
-              <option value="off">Off</option>
-              <option value="auto">Auto</option>
-            </select>
-            <p className="text-xs text-gray-500 mt-1">
-              Critical for long context windows. Keep On.
-            </p>
-          </div>
+              {/* Flash Attention */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">
+                  Flash Attention
+                </label>
+                <select
+                  value={flashAttn}
+                  onChange={e => setFlashAttn(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                >
+                  <option value="on">On (recommended)</option>
+                  <option value="off">Off</option>
+                  <option value="auto">Auto</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Critical for long context windows. Keep On.
+                </p>
+              </div>
 
-          {/* KV Cache Quantization */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">
-                KV Cache Keys
-              </label>
-              <select
-                value={cacheTypeK}
-                onChange={e => setCacheTypeK(e.target.value)}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
-              >
-                <option value="q4_0">q4_0 (75% memory savings)</option>
-                <option value="q8_0">q8_0 (50% savings, more precision)</option>
-                <option value="f16">f16 (no savings, full precision)</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">
-                KV Cache Values
-              </label>
-              <select
-                value={cacheTypeV}
-                onChange={e => setCacheTypeV(e.target.value)}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
-              >
-                <option value="q4_0">q4_0 (75% memory savings)</option>
-                <option value="q8_0">q8_0 (50% savings, more precision)</option>
-                <option value="f16">f16 (no savings, full precision)</option>
-              </select>
-            </div>
-          </div>
-          <p className="text-xs text-gray-500 -mt-2">
-            q4_0 recommended for 100K+ context. f16 for maximum quality.
-          </p>
+              {/* KV Cache Quantization */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    KV Cache Keys
+                  </label>
+                  <select
+                    value={cacheTypeK}
+                    onChange={e => setCacheTypeK(e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  >
+                    <option value="q4_0">q4_0 (75% savings)</option>
+                    <option value="q4_1">q4_1 (73% savings)</option>
+                    <option value="q5_0">q5_0 (69% savings)</option>
+                    <option value="q5_1">q5_1 (66% savings)</option>
+                    <option value="q8_0">q8_0 (50% savings)</option>
+                    <option value="f16">f16 (no savings, full precision)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    KV Cache Values
+                  </label>
+                  <select
+                    value={cacheTypeV}
+                    onChange={e => setCacheTypeV(e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  >
+                    <option value="q4_0">q4_0 (75% savings)</option>
+                    <option value="q4_1">q4_1 (73% savings)</option>
+                    <option value="q5_0">q5_0 (69% savings)</option>
+                    <option value="q5_1">q5_1 (66% savings)</option>
+                    <option value="q8_0">q8_0 (50% savings)</option>
+                    <option value="f16">f16 (no savings, full precision)</option>
+                  </select>
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 -mt-2">
+                q4_0 recommended for 100K+ context. f16 for maximum quality.
+              </p>
 
-          {/* GPU Layers */}
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">
-              GPU Layers
-            </label>
-            <input
-              type="number"
-              value={gpuLayers}
-              onChange={e => setGpuLayers(Number(e.target.value))}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              -1 = all layers on Metal GPU (recommended for Apple Silicon)
-            </p>
-          </div>
+              {/* GPU Layers */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">
+                  GPU Layers
+                </label>
+                <input
+                  type="number"
+                  value={gpuLayers}
+                  onChange={e => setGpuLayers(Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  -1 = all layers on Metal GPU (recommended for Apple Silicon)
+                </p>
+              </div>
+
+              {/* Advanced GGUF params */}
+              <details className="group">
+                <summary className="cursor-pointer text-sm text-gray-400 hover:text-gray-300 transition-colors select-none flex items-center gap-1">
+                  <svg className="w-3 h-3 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                  Advanced
+                </summary>
+                <div className="mt-3 space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-1">CPU Threads</label>
+                      <input
+                        type="number"
+                        value={threads}
+                        onChange={e => setThreads(Number(e.target.value))}
+                        className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">-1 = auto</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-1">Batch Size</label>
+                      <input
+                        type="number"
+                        value={batchSize}
+                        onChange={e => setBatchSize(Number(e.target.value))}
+                        className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Default: 2048</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-1">RoPE Scaling</label>
+                      <select
+                        value={ropeScaling}
+                        onChange={e => setRopeScaling(e.target.value)}
+                        className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      >
+                        <option value="none">None</option>
+                        <option value="linear">Linear</option>
+                        <option value="yarn">YaRN</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-1">RoPE Scale</label>
+                      <input
+                        type="number"
+                        value={ropeScale}
+                        onChange={e => setRopeScale(Number(e.target.value))}
+                        step={0.1}
+                        className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Context extension factor</p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-6">
+                    <label className="flex items-center gap-2 text-sm text-gray-300">
+                      <input
+                        type="checkbox"
+                        checked={mlock}
+                        onChange={e => setMlock(e.target.checked)}
+                        className="rounded"
+                      />
+                      mlock (pin to RAM)
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-gray-300">
+                      <input
+                        type="checkbox"
+                        checked={mmap}
+                        onChange={e => setMmap(e.target.checked)}
+                        className="rounded"
+                      />
+                      mmap
+                    </label>
+                  </div>
+                </div>
+              </details>
+            </>
+          )}
+
+          {isMLX && (
+            <>
+              {/* Context Length */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">
+                  Context Length
+                </label>
+                <input
+                  type="number"
+                  value={mlxContextLength}
+                  onChange={e => setMlxContextLength(Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  0 = use model default
+                </p>
+              </div>
+
+              {/* Prompt Cache */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">
+                  Prompt Cache Entries
+                </label>
+                <input
+                  type="number"
+                  value={promptCacheSize}
+                  onChange={e => setPromptCacheSize(Number(e.target.value))}
+                  min={0}
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Max KV cache entries to keep for prompt reuse. Default: 10
+                </p>
+              </div>
+
+              {/* Tool calling */}
+              <div>
+                <label className="flex items-center gap-2 text-sm text-gray-300">
+                  <input
+                    type="checkbox"
+                    checked={enableAutoToolChoice}
+                    onChange={e => setEnableAutoToolChoice(e.target.checked)}
+                    className="rounded"
+                  />
+                  Enable Auto Tool Choice
+                </label>
+                <p className="text-xs text-gray-500 mt-1">
+                  Allow the model to automatically decide when to call tools
+                </p>
+              </div>
+
+              {/* Advanced MLX params */}
+              <details className="group">
+                <summary className="cursor-pointer text-sm text-gray-400 hover:text-gray-300 transition-colors select-none flex items-center gap-1">
+                  <svg className="w-3 h-3 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                  Advanced
+                </summary>
+                <div className="mt-3 space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-1">
+                      Reasoning Parser
+                    </label>
+                    <select
+                      value={reasoningParser}
+                      onChange={e => setReasoningParser(e.target.value)}
+                      className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    >
+                      <option value="">Auto-detect</option>
+                      <option value="gemma4">Gemma 4</option>
+                      <option value="qwen3">Qwen 3</option>
+                      <option value="qwen3_5">Qwen 3.5</option>
+                      <option value="hermes">Hermes</option>
+                      <option value="harmony">Harmony</option>
+                      <option value="nemotron3_nano">Nemotron 3 Nano</option>
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Parser for thinking/reasoning blocks. Auto-detect usually works.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-1">
+                      Chat Template Override
+                    </label>
+                    <input
+                      type="text"
+                      value={chatTemplateFile}
+                      onChange={e => setChatTemplateFile(e.target.value)}
+                      placeholder="Path to custom chat template file"
+                      className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Override the model's chat template. Leave empty for default.
+                    </p>
+                  </div>
+
+                  <label className="flex items-center gap-2 text-sm text-gray-300">
+                    <input
+                      type="checkbox"
+                      checked={trustRemoteCode}
+                      onChange={e => setTrustRemoteCode(e.target.checked)}
+                      className="rounded"
+                    />
+                    Trust Remote Code
+                  </label>
+                </div>
+              </details>
+            </>
+          )}
 
           {/* Actions */}
           <div className="flex gap-3 pt-2">

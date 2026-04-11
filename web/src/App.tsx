@@ -20,7 +20,7 @@ function App() {
           <Sidebar />
 
           {/* Main content */}
-          <main className="flex-1 overflow-auto">
+          <main className="flex-1 overflow-auto relative osc-scanlines">
             <ConnectionBanner />
             <Routes>
               <Route path="/" element={<ModelsPage />} />

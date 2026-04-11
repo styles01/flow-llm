@@ -138,7 +138,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ hf_id: hfId, filename, local_dir: localDir }),
     }),
-  loadModel: (id: string, opts?: { ctx_size?: number; flash_attn?: string; cache_type_k?: string; cache_type_v?: string; gpu_layers?: number; n_parallel?: number }) =>
+  loadModel: (id: string, opts?: {
+    ctx_size?: number; flash_attn?: string; cache_type_k?: string; cache_type_v?: string; gpu_layers?: number; n_parallel?: number;
+    mlx_context_length?: number; mlx_prompt_cache_size?: number; mlx_enable_auto_tool_choice?: boolean;
+    mlx_reasoning_parser?: string; mlx_chat_template_file?: string; mlx_trust_remote_code?: boolean;
+  }) =>
     fetchAPI<{ model_id: string; status: string; port: number; base_url: string }>(`/models/${encodeURIComponent(id)}/load`, {
       method: 'POST',
       body: JSON.stringify(opts || {}),
@@ -185,4 +189,10 @@ export const api = {
 
   // Download progress
   getDownloads: () => fetchAPI<Record<string, any>>('/downloads'),
+
+  // Processing progress
+  getProcessingProgress: () => fetchAPI<{ progress: Record<string, number> }>('/processing-progress'),
+
+  // Backend logs
+  getLogs: (lines?: number) => fetchAPI<{ logs: string[] }>(`/logs${lines ? `?lines=${lines}` : ''}`),
 };
