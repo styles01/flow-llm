@@ -146,19 +146,19 @@ export default function ModelsPage() {
             value={registerPath}
             onChange={e => setRegisterPath(e.target.value)}
             placeholder="/Volumes/James4TBSSD/llms/model-Q4_K_M.gguf"
-            className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-teal-500"
           />
           <input
             type="text"
             value={registerName}
             onChange={e => setRegisterName(e.target.value)}
             placeholder="Display name (optional)"
-            className="w-48 px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="w-48 px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-teal-500"
           />
           <button
             onClick={() => registerMut.mutate()}
             disabled={!registerPath.trim()}
-            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 rounded-md text-sm font-medium"
+            className="px-4 py-2 bg-teal-600 hover:bg-teal-500 disabled:bg-gray-700 disabled:text-gray-500 rounded-md text-sm font-medium"
           >
             Register
           </button>
@@ -246,7 +246,7 @@ export default function ModelsPage() {
                   ) : m.status === 'available' ? (
                     <button
                       onClick={() => setLoadDialogModel(m)}
-                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded-md text-sm"
+                      className="px-3 py-1.5 bg-teal-600 hover:bg-teal-500 rounded-md text-sm"
                     >
                       Load
                     </button>
@@ -278,12 +278,12 @@ export default function ModelsPage() {
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && searchHF.mutate(searchQuery)}
             placeholder="Search models (e.g. Qwen3.5, gemma-4, llama-4)..."
-            className="flex-1 px-4 py-2 bg-gray-900 border border-gray-700 rounded-md text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="flex-1 px-4 py-2 bg-gray-900 border border-gray-700 rounded-md text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-teal-500"
           />
           <button
             onClick={() => searchHF.mutate(searchQuery)}
             disabled={!searchQuery.trim()}
-            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 rounded-md text-sm font-medium"
+            className="px-4 py-2 bg-teal-600 hover:bg-teal-500 disabled:bg-gray-700 disabled:text-gray-500 rounded-md text-sm font-medium"
           >
             Search
           </button>
@@ -299,7 +299,7 @@ export default function ModelsPage() {
                 onClick={() => setSelectedModel(r.id)}
                 className={`cursor-pointer flex items-center justify-between p-3 rounded-lg border transition-colors ${
                   selectedModel === r.id
-                    ? 'bg-gray-800 border-indigo-500'
+                    ? 'bg-gray-800 border-teal-500'
                     : 'bg-gray-900 border-gray-800 hover:border-gray-600'
                 }`}
               >

@@ -186,7 +186,7 @@ async def lifespan(app: FastAPI):
     # Auto-detect running backends on common ports
     await _auto_detect_backends()
 
-    logger.info("JAMES started — data dir: %s", settings.data_dir)
+    logger.info("Flow LLM started — data dir: %s", settings.data_dir)
 
     yield
 
@@ -200,8 +200,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="JAMES",
-    description="Just A Model Execution Server — local LLM gateway for OpenClaw",
+    title="Flow LLM",
+    description="macOS LLM Orchestration — local model management and OpenAI-compatible proxy",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -1107,7 +1107,7 @@ async def serve_frontend(full_path: str):
 
 
 def main():
-    """Run the JAMES server."""
+    """Run the Flow LLM server."""
     import uvicorn
     uvicorn.run(
         "james.main:app",

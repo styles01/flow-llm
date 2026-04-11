@@ -83,7 +83,7 @@ export default function SettingsPage() {
               type="number"
               value={ctxSize}
               onChange={e => setCtxSize(Number(e.target.value))}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
             />
             <p className="text-xs text-gray-500 mt-1">
               Effective total: {effectiveCtx.toLocaleString()} tokens ({ctxSize.toLocaleString()} × {nParallel} slots)
@@ -101,7 +101,7 @@ export default function SettingsPage() {
               onChange={e => setNParallel(Number(e.target.value))}
               min={1}
               max={8}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
             />
             <p className="text-xs text-gray-500 mt-1">
               Concurrent request slots — needed for multi-turn agent conversations. More slots = more memory.
@@ -116,7 +116,7 @@ export default function SettingsPage() {
             <select
               value={flashAttn}
               onChange={e => setFlashAttn(e.target.value)}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
             >
               <option value="on">On (recommended)</option>
               <option value="off">Off</option>
@@ -138,7 +138,7 @@ export default function SettingsPage() {
                 <select
                   value={cacheTypeK}
                   onChange={e => setCacheTypeK(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
                 >
                   <option value="q4_0">q4_0 (75% savings)</option>
                   <option value="q8_0">q8_0 (50% savings)</option>
@@ -150,7 +150,7 @@ export default function SettingsPage() {
                 <select
                   value={cacheTypeV}
                   onChange={e => setCacheTypeV(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
                 >
                   <option value="q4_0">q4_0 (75% savings)</option>
                   <option value="q8_0">q8_0 (50% savings)</option>
@@ -172,7 +172,7 @@ export default function SettingsPage() {
               type="number"
               value={gpuLayers}
               onChange={e => setGpuLayers(Number(e.target.value))}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
             />
             <p className="text-xs text-gray-500 mt-1">
               -1 = all layers on Metal GPU (recommended for Apple Silicon)
@@ -184,7 +184,7 @@ export default function SettingsPage() {
             <button
               onClick={() => saveMut.mutate()}
               disabled={saveMut.isPending}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 rounded-md font-medium"
+              className="px-4 py-2 bg-teal-600 hover:bg-teal-500 disabled:bg-gray-700 rounded-md font-medium"
             >
               {saveMut.isPending ? 'Saving...' : 'Save Defaults'}
             </button>
@@ -229,7 +229,7 @@ export default function SettingsPage() {
             <div className="mt-4">
               <div className="w-full bg-gray-800 rounded-full h-3">
                 <div
-                  className="bg-indigo-600 h-3 rounded-full transition-all"
+                  className="bg-teal-600 h-3 rounded-full transition-all"
                   style={{ width: `${(hw.memory_used_gb / hw.memory_total_gb) * 100}%` }}
                 />
               </div>

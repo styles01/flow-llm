@@ -49,7 +49,7 @@ export default function RunningPage() {
           <div className="mt-3">
             <div className="w-full bg-gray-800 rounded-full h-3">
               <div
-                className="bg-indigo-600 h-3 rounded-full transition-all"
+                className="bg-teal-600 h-3 rounded-full transition-all"
                 style={{ width: `${(hw.memory_used_gb / hw.memory_total_gb) * 100}%` }}
               />
             </div>

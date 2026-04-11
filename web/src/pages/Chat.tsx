@@ -177,7 +177,7 @@ export default function ChatPage() {
             <button
               onClick={() => loadMut.mutate(selectedModel)}
               disabled={loadMut.isPending}
-              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 rounded-md text-sm font-medium"
+              className="px-3 py-1.5 bg-teal-600 hover:bg-teal-500 disabled:bg-gray-700 rounded-md text-sm font-medium"
             >
               {loadMut.isPending ? 'Loading...' : 'Load Model'}
             </button>
@@ -201,7 +201,7 @@ export default function ChatPage() {
         <textarea
           value={systemPrompt}
           onChange={(e) => setSystemPrompt(e.target.value)}
-          className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-md text-white font-mono text-sm h-24 resize-y focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-md text-white font-mono text-sm h-24 resize-y focus:outline-none focus:ring-2 focus:ring-teal-500"
         />
       </div>
 
@@ -234,12 +234,12 @@ export default function ChatPage() {
           onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendMessage()}
           disabled={!canSend}
           placeholder={canSend ? "Type a message..." : selectedModel ? `Model status: ${selectedModelInfo?.status || 'unknown'}` : "Select a model"}
-          className="flex-1 px-4 py-2 bg-gray-900 border border-gray-700 rounded-md text-white disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          className="flex-1 px-4 py-2 bg-gray-900 border border-gray-700 rounded-md text-white disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-teal-500"
         />
         <button
           onClick={sendMessage}
           disabled={!canSend}
-          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 rounded-md font-medium"
+          className="px-4 py-2 bg-teal-600 hover:bg-teal-500 disabled:bg-gray-700 rounded-md font-medium"
         >
           {streaming ? 'Streaming...' : 'Send'}
         </button>

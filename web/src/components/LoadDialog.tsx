@@ -55,7 +55,7 @@ export function LoadDialog({ model, onClose }: LoadDialogProps) {
               type="number"
               value={ctxSize}
               onChange={e => setCtxSize(Number(e.target.value))}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
             />
             <p className="text-xs text-gray-500 mt-1">
               Effective total: {effectiveCtx.toLocaleString()} tokens ({ctxSize.toLocaleString()} × {nParallel} slots)
@@ -73,7 +73,7 @@ export function LoadDialog({ model, onClose }: LoadDialogProps) {
               onChange={e => setNParallel(Number(e.target.value))}
               min={1}
               max={4}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
             />
             <p className="text-xs text-gray-500 mt-1">
               Concurrent request slots for multi-turn agent loops
@@ -88,7 +88,7 @@ export function LoadDialog({ model, onClose }: LoadDialogProps) {
             <select
               value={flashAttn}
               onChange={e => setFlashAttn(e.target.value)}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
             >
               <option value="on">On (recommended)</option>
               <option value="off">Off</option>
@@ -108,7 +108,7 @@ export function LoadDialog({ model, onClose }: LoadDialogProps) {
               <select
                 value={cacheTypeK}
                 onChange={e => setCacheTypeK(e.target.value)}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
               >
                 <option value="q4_0">q4_0 (75% memory savings)</option>
                 <option value="q8_0">q8_0 (50% savings, more precision)</option>
@@ -122,7 +122,7 @@ export function LoadDialog({ model, onClose }: LoadDialogProps) {
               <select
                 value={cacheTypeV}
                 onChange={e => setCacheTypeV(e.target.value)}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
               >
                 <option value="q4_0">q4_0 (75% memory savings)</option>
                 <option value="q8_0">q8_0 (50% savings, more precision)</option>
@@ -143,7 +143,7 @@ export function LoadDialog({ model, onClose }: LoadDialogProps) {
               type="number"
               value={gpuLayers}
               onChange={e => setGpuLayers(Number(e.target.value))}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
             />
             <p className="text-xs text-gray-500 mt-1">
               -1 = all layers on Metal GPU (recommended for Apple Silicon)
@@ -155,7 +155,7 @@ export function LoadDialog({ model, onClose }: LoadDialogProps) {
             <button
               onClick={() => loadMut.mutate()}
               disabled={loadMut.isPending}
-              className="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 rounded-md font-medium"
+              className="flex-1 px-4 py-2.5 bg-teal-600 hover:bg-teal-500 disabled:bg-gray-700 disabled:text-gray-500 rounded-md font-medium"
             >
               {loadMut.isPending ? 'Loading...' : 'Load Model'}
             </button>
