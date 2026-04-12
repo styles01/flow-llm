@@ -2,6 +2,18 @@
 
 ## 2026-04-12
 
+### Backend Update Management
+- **Persisted settings to disk** — model load defaults and the `auto_update_backends` toggle are now saved in `settings.json` under the Flow data directory and loaded at startup.
+- **Added backend version APIs** — new endpoints expose installed/latest versions and allow manual checks or upgrades: `/api/backend-versions`, `/api/check-updates`, and `/api/update-backend/{backend}`.
+- **Background update check on startup** — the server now runs a non-blocking backend version check during startup and can auto-update supported installs when the setting is enabled.
+- **Added `server/flow_llm/updater.py`** — centralizes version detection and update logic for Homebrew-installed `llama.cpp` and pip-installed `mlx-openai-server`.
+
+### Instances: Live Model Activity
+- **Added `/api/model-activity`** — returns per-model slot activity plus llama.cpp metrics such as queued turns, tokens/sec, and KV cache usage.
+- **Reworked backend progress tracking to per-slot state** — stderr parsing now records slot-level `prefill` and `generating` state in `_slot_states` instead of a single global progress number.
+- **Instances page now shows slot activity** — prefill bars, generating indicators, queue depth, and KV cache usage are rendered inline for each running model.
+- **Models page now auto-refreshes local model status** every 5 seconds so background load/unload changes surface without a manual refresh.
+
 ### Chat: Fix Gemma Responses Being Swallowed
 - **Added `reasoning_content` support** — Gemma 4 (via llama-server) sends thinking tokens in `delta.reasoning_content` instead of `delta.content`. The streaming parser was only reading `content`, causing ALL of Gemma's thinking to be silently dropped. Now both `content` and `reasoning_content` are accumulated separately and displayed correctly — thinking as a collapsible block, response text as the main bubble.
 - **Added `reasoningContent` field to Message type** — assistant messages can now carry a separate `reasoningContent` string for models that use the `reasoning_content` SSE field.
@@ -18,7 +30,7 @@
 - **Added processing progress indicator in Chat** — when a model is processing a prompt (prefill phase), a progress bar with percentage appears inline in the chat before tokens start streaming. Polls `/api/processing-progress` every 500ms while streaming.
 - **Added "Generating..." indicator** — when streaming is active but no processing progress is reported (tokens already flowing), a small spinner with "Generating..." appears inline.
 - **Processing progress clears automatically** once tokens start flowing in the stream.
-- **Backend: stderr progress monitoring** — `BackendProcess._monitor_stderr()` now parses `llama_progress` and `prefill` patterns from backend stderr, updates `_processing_progress` dict, and broadcasts progress via WebSocket.
+- **Backend: stderr progress monitoring** — `BackendProcess._monitor_stderr()` now parses per-slot prefill/generation state from backend stderr and updates `_slot_states`, which feed both `/api/processing-progress` and `/api/model-activity`.
 - **Backend: stdout monitoring** — Added `_monitor_stdout()` thread to capture stdout lines from backend processes.
 - **Backend: `/api/processing-progress` endpoint** — Returns processing progress for all currently processing models.
 - **Backend: progress reset on request** — `reset_processing_progress()` called at start of chat completions, progress cleared in stream `finally` block.
@@ -36,22 +48,30 @@
 ### Files Created (2026-04-12)
 - `web/src/store/sessionStore.ts`
 - `web/src/pages/Logs.tsx`
+- `server/flow_llm/updater.py`
 
 ### Files Modified (2026-04-12)
+- `server/flow_llm/config.py` — persisted settings load/save support
+- `server/flow_llm/main.py` — backend version/update routes, startup update check, `/api/model-activity`
+- `server/flow_llm/process_manager.py` — per-slot activity tracking instead of single progress number
+- `web/src/pages/Settings.tsx` — backend versions/update controls, persisted auto-update toggle
+- `web/src/pages/Running.tsx` — live activity strip for each running model
+- `web/src/pages/Models.tsx` — periodic model list refresh
+- `web/src/api/client.ts` — updater and model-activity API client types/endpoints
 - `web/src/pages/Chat.tsx` — processing progress, generating indicator, session store
 - `web/src/pages/Logs.tsx` — session store for log persistence across navigation
 - `web/src/App.tsx` — added Logs route
 - `web/src/components/Sidebar.tsx` — added Logs nav item with icon
 - `web/src/api/client.ts` — added `getProcessingProgress()` and `getLogs()` endpoints
-- `server/james/process_manager.py` — log buffer, `append_log()`, `get_logs()`, stdout monitor
-- `server/james/main.py` — `/api/logs` and `/api/processing-progress` endpoints
+- `server/flow_llm/process_manager.py` — log buffer, `append_log()`, `get_logs()`, stdout monitor
+- `server/flow_llm/main.py` — `/api/logs` and `/api/processing-progress` endpoints
 
 ## 2026-04-11
 
 ### Brand & Visual Identity
 - **Fixed logo to mirrored oscilloscope waveform** — teal trace peaks above center axis, magenta trace is the exact reflection below, like a dual-trace oscilloscope. No more overlapping waveforms.
 - **Updated favicon.svg** to match the new mirrored waveform design with grid lines and center axis.
-- **Renamed all "JAMES" references to "Flow"** in the UI (Settings.tsx OpenClaw config, provider key, display text).
+- **Renamed all legacy brand references to "Flow"** in the UI (Settings.tsx OpenClaw config, provider key, display text).
 - **Renamed "Chat Test" → "Chat"** and **"Running" → "Instances"** in sidebar nav and page headings.
 - **Added CRT scanline overlay** to main content area for the synthwave/oscilloscope aesthetic.
 - **Established full design token system** in `index.css` — color tokens, typography scale, spacing tokens, oscilloscope visual effects (phosphor glow, neon border, waveform animation).
@@ -131,7 +151,7 @@
 - `web/src/components/DownloadProgress.tsx`
 - `web/src/components/ConnectionBanner.tsx`
 - `web/src/utils/errors.ts`
-- `UX_REDESIGN_PLAN.md`
+- `docs/ux-redesign-plan.md`
 
 ---
 
@@ -168,7 +188,7 @@
 ### Documentation
 - **Added Prerequisites section to README** — Documents required dependencies: llama.cpp, mlx-openai-server, Python 3.11+, Node.js 18+.
 - **Added Dependencies tables** — Server and web dependencies listed with install commands.
-- **Renamed package** — `pyproject.toml` package name changed from "james" to "flow-llm".
+- **Renamed package** — the Python package now lives at `flow_llm` and `pyproject.toml` exposes the public package name `flow-llm`.
 
 ### Backend Integration
 - **MLX load parameters wired through** — The MLX-specific fields from the load dialog (context-length, prompt-cache-size, enable-auto-tool-choice, reasoning-parser, chat-template-file, trust-remote-code) are now passed through the full stack: frontend `loadModel()` → `ModelLoadRequest` → `process_manager.start_model()` → `BackendProcess.build_command()`. MLX params are conditionally included based on backend type.

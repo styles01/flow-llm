@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# start.sh — Launch JAMES (backend + frontend)
+# start.sh — Launch Flow LLM (backend + frontend)
 #
 # Usage:
 #   ./start.sh          # Start everything
@@ -12,18 +12,18 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKEND_PID=""
 FRONTEND_PID=""
-PID_FILE="$ROOT_DIR/.james.pid"
+PID_FILE="$ROOT_DIR/.flow.pid"
 
 start_backend() {
-  echo "Starting JAMES backend on port 3377..."
+  echo "Starting Flow LLM backend on port 3377..."
   cd "$ROOT_DIR/server"
-  python3 -m james.main &
+  python3 -m flow_llm.main &
   BACKEND_PID=$!
   echo "Backend PID: $BACKEND_PID"
 }
 
 start_frontend() {
-  echo "Starting JAMES frontend..."
+  echo "Starting Flow LLM frontend..."
   cd "$ROOT_DIR/web"
 
   # Build if dist doesn't exist
@@ -40,7 +40,7 @@ start_frontend() {
 
 stop_all() {
   if [ -f "$PID_FILE" ]; then
-    echo "Stopping JAMES..."
+    echo "Stopping Flow LLM..."
     while IFS=: read -r name pid; do
       if kill -0 "$pid" 2>/dev/null; then
         kill "$pid" 2>/dev/null && echo "Stopped $name (PID $pid)"
@@ -48,7 +48,7 @@ stop_all() {
     done < "$PID_FILE"
     rm -f "$PID_FILE"
   else
-    echo "No PID file found. JAMES may not be running."
+    echo "No PID file found. Flow LLM may not be running."
   fi
 }
 
@@ -77,7 +77,7 @@ case "${1:-all}" in
     echo "frontend:$FRONTEND_PID" >> "$PID_FILE"
     echo ""
     echo "╔════════════════════════════════════════╗"
-    echo "║            JAMES is running            ║"
+    echo "║          Flow LLM is running           ║"
     echo "╠════════════════════════════════════════╣"
     echo "║  Frontend:  http://localhost:5173      ║"
     echo "║  Backend:   http://localhost:3377      ║"

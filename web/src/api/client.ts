@@ -123,6 +123,32 @@ export interface AppSettings {
   default_gpu_layers: number
   default_n_parallel: number
   models_dir: string
+  auto_update_backends: boolean
+}
+
+export interface ComponentVersion {
+  name: string
+  current: string | null
+  latest: string | null
+  update_available: boolean
+  install_method: string  // "brew" | "pip" | "not_found" | "unknown"
+  updating: boolean
+  update_log: string[]
+  error: string | null
+}
+
+export interface SlotActivity {
+  slot_id: number
+  state: 'prefill' | 'generating' | 'idle'
+  progress: number   // 0-1 during prefill, 1.0 when generating
+}
+
+export interface ModelActivity {
+  slots: SlotActivity[]          // one entry per active slot
+  slots_processing: number | null
+  slots_deferred: number | null
+  tokens_per_sec: number | null
+  kv_cache_usage: number | null
 }
 
 export const api = {
@@ -201,4 +227,16 @@ export const api = {
     const qs = params.toString()
     return fetchAPI<{ logs: string[] }>(`/logs${qs ? `?${qs}` : ''}`)
   },
+
+  // Backend versions and updates
+  getBackendVersions: () =>
+    fetchAPI<Record<string, ComponentVersion>>('/backend-versions'),
+  checkUpdates: () =>
+    fetchAPI<{ status: string }>('/check-updates', { method: 'POST' }),
+  updateBackend: (backend: 'llamacpp' | 'mlx') =>
+    fetchAPI<{ status: string }>(`/update-backend/${backend}`, { method: 'POST' }),
+
+  // Live model activity (slots, token rate, KV cache)
+  getModelActivity: () =>
+    fetchAPI<{ activity: Record<string, ModelActivity> }>('/model-activity'),
 };

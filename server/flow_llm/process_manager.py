@@ -10,26 +10,48 @@ from typing import Optional
 
 from psutil import Process
 
-from james.config import settings, DEFAULT_LLAMACPP_HOST
+from flow_llm.config import settings, DEFAULT_LLAMACPP_HOST
 
 logger = logging.getLogger(__name__)
 
-# Progress tracking for model processing (prefill/generation)
-_processing_progress: dict[str, float] = {}  # model_id -> progress (0.0-1.0)
+# Per-slot activity tracking (model_id -> slot_id -> state dict)
+# state dict: {"state": "prefill"|"generating"|"idle", "progress": 0-1, "task_id": int|None}
+_slot_states: dict[str, dict[int, dict]] = {}
+
+
+def get_slot_states(model_id: str) -> dict[int, dict]:
+    """Return all slot states for a model."""
+    return _slot_states.get(model_id, {})
+
+
+def get_processing_progress(model_id: str) -> Optional[float]:
+    """Return max prefill progress across active slots (for Chat page compat)."""
+    slots = _slot_states.get(model_id, {})
+    prefill = [s["progress"] for s in slots.values() if s["state"] == "prefill"]
+    return max(prefill) if prefill else None
+
+
+def reset_processing_progress(model_id: str):
+    """Called at start of each proxy request — clears any stale slot state."""
+    _slot_states.pop(model_id, None)
+
+
+def _update_slot(model_id: str, slot_id: int, **kwargs):
+    if model_id not in _slot_states:
+        _slot_states[model_id] = {}
+    if slot_id not in _slot_states[model_id]:
+        _slot_states[model_id][slot_id] = {"state": "idle", "progress": 0.0, "task_id": None}
+    _slot_states[model_id][slot_id].update(kwargs)
+
+
+def _clear_slot(model_id: str, slot_id: int):
+    if model_id in _slot_states:
+        _slot_states[model_id].pop(slot_id, None)
+
 
 # Log buffer for backend processes (rotating buffer, max 2000 lines per model)
 _log_buffers: dict[str, deque[str]] = {}
 _MAX_LOG_LINES = 2000
-
-
-def get_processing_progress(model_id: str) -> Optional[float]:
-    """Get the processing progress for a model (0.0 to 1.0), or None if not processing."""
-    return _processing_progress.get(model_id)
-
-
-def reset_processing_progress(model_id: str):
-    """Reset processing progress for a model (call when a new request starts)."""
-    _processing_progress[model_id] = 0.0
 
 
 def append_log(model_id: str, line: str):
@@ -101,9 +123,17 @@ class BackendProcess:
         self._health_task: Optional[asyncio.Task] = None
 
     def _monitor_stderr(self):
-        """Read stderr from the backend process and parse progress lines."""
+        """Read stderr from the backend process and parse per-slot progress lines."""
         if not self.process or not self.process.stderr:
             return
+
+        # Regex to extract slot id and task id from llama-server log lines:
+        #   "slot update_slots: id  0 | task 146 | ..."
+        #   "slot      release: id  0 | task 146 | ..."
+        _slot_re = re.compile(r'\bid\s+(\d+)\s*\|\s*task\s+(\d+)')
+        # Prefill progress: "prompt processing progress, n_tokens = X, ..., progress = 0.123"
+        _progress_re = re.compile(r'prompt processing progress.*?progress\s*=\s*(\d+\.?\d*)', re.DOTALL)
+
         try:
             for line in iter(self.process.stderr.readline, b''):
                 if not line:
@@ -111,37 +141,43 @@ class BackendProcess:
                 text = line.decode(errors='replace').strip()
                 if not text:
                     continue
-                # Store in log buffer
+
                 append_log(self.model_id, text)
-                logger.debug(f"[{self.model_id}] stderr: {text}")
-                # llama-server prefill progress: "llama_progress: 0.42" or "prefill: 42%"
-                m = re.search(r'(?:llama_progress|prefill)[:\s]+(\d+\.?\d*)', text, re.IGNORECASE)
-                if m:
-                    val = float(m.group(1))
-                    # Normalize: if > 1, assume it's a percentage (e.g., 42)
-                    progress = val / 100.0 if val > 1.0 else val
-                    _processing_progress[self.model_id] = min(progress, 1.0)
-                    # Broadcast via WebSocket
-                    try:
-                        import asyncio
-                        from james.main import broadcast
-                        loop = asyncio.get_event_loop()
-                        if loop.is_running():
-                            loop.create_task(broadcast("processing_progress", {
-                                "model_id": self.model_id,
-                                "progress": _processing_progress[self.model_id],
-                            }))
-                    except Exception:
-                        pass
-                # Also detect when processing starts/resets
-                if 'load model' in text.lower() or 'processing' in text.lower():
-                    if self.model_id not in _processing_progress:
-                        _processing_progress[self.model_id] = 0.0
+
+                # Extract slot/task ids if present
+                sm = _slot_re.search(text)
+                slot_id = int(sm.group(1)) if sm else None
+                task_id = int(sm.group(2)) if sm else None
+
+                if slot_id is None:
+                    # "srv  update_slots: all slots are idle"
+                    if 'all slots are idle' in text:
+                        _slot_states.pop(self.model_id, None)
+                    continue
+
+                # Prefill progress line
+                pm = _progress_re.search(text)
+                if pm:
+                    progress = min(float(pm.group(1)), 1.0)
+                    _update_slot(self.model_id, slot_id,
+                                 state="prefill", progress=progress, task_id=task_id)
+                    continue
+
+                # Prefill done → now generating
+                if 'prompt processing done' in text:
+                    _update_slot(self.model_id, slot_id,
+                                 state="generating", progress=1.0, task_id=task_id)
+                    continue
+
+                # Slot released → idle/done
+                if 'stop processing' in text or 'release' in text.split(':')[0]:
+                    _clear_slot(self.model_id, slot_id)
+                    continue
+
         except Exception as e:
             logger.debug(f"stderr monitor for {self.model_id} ended: {e}")
         finally:
-            # Clean up progress when process exits
-            _processing_progress.pop(self.model_id, None)
+            _slot_states.pop(self.model_id, None)
 
     def _monitor_stdout(self):
         """Read stdout from the backend process and store in log buffer."""
@@ -290,7 +326,7 @@ class BackendProcess:
 
 
 class ExternalProcess:
-    """Represents an already-running backend not started by JAMES."""
+    """Represents an already-running backend not started by Flow LLM."""
 
     def __init__(self, model_id: str, backend: str, base_url: str, port: int):
         self.model_id = model_id
@@ -404,7 +440,7 @@ class ProcessManager:
     async def stop_model(self, model_id: str) -> bool:
         """Stop a running model. For managed processes, kills the subprocess.
         For external processes, kills whatever is listening on that port."""
-        print(f"[JAMES] stop_model('{model_id}') — external={list(self._external.keys())} processes={list(self._processes.keys())}")
+        print(f"[Flow] stop_model('{model_id}') — external={list(self._external.keys())} processes={list(self._processes.keys())}")
         logger.info(f"stop_model called for {model_id}, external={list(self._external.keys())}, processes={list(self._processes.keys())}")
 
         # External process — find and kill the process on that port
@@ -412,21 +448,21 @@ class ProcessManager:
             ext = self._external[model_id]
             port = ext.port
             del self._external[model_id]
-            print(f"[JAMES] Killing external backend on port {port}")
+            print(f"[Flow] Killing external backend on port {port}")
             logger.info(f"Unregistering external backend: model={model_id} port={port}")
 
             # Kill the process listening on that port
             killed = await self._kill_port(port)
             if killed:
-                print(f"[JAMES] Successfully killed process on port {port}")
+                print(f"[Flow] Successfully killed process on port {port}")
                 logger.info(f"Killed process on port {port}")
             else:
-                print(f"[JAMES] WARNING: No process found on port {port} to kill")
+                print(f"[Flow] WARNING: No process found on port {port} to kill")
                 logger.warning(f"No process found on port {port} to kill")
             return True
 
         if model_id not in self._processes:
-            print(f"[JAMES] Model '{model_id}' not found in any process list")
+            print(f"[Flow] Model '{model_id}' not found in any process list")
             return False
 
         proc = self._processes[model_id]
@@ -436,7 +472,7 @@ class ProcessManager:
         return success
 
     def register_external(self, model_id: str, backend: str, base_url: str, port: int) -> ExternalProcess:
-        """Register an already-running backend process not started by JAMES."""
+        """Register an already-running backend process not started by Flow LLM."""
         ext = ExternalProcess(model_id=model_id, backend=backend, base_url=base_url, port=port)
         self._external[model_id] = ext
         logger.info(f"Registered external backend: model={model_id} base_url={base_url}")
@@ -477,7 +513,7 @@ class ProcessManager:
             pids = stdout.decode().strip().split('\n')
             pids = [p.strip() for p in pids if p.strip()]
 
-            print(f"[JAMES] _kill_port({port}): found PIDs={pids}")
+            print(f"[Flow] _kill_port({port}): found PIDs={pids}")
 
             if not pids:
                 return False

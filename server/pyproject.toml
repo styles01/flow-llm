@@ -23,6 +23,9 @@ dev = [
     "ruff>=0.9.0",
 ]
 
+[project.scripts]
+flow = "flow_llm.main:main"
+
 [build-system]
 requires = ["setuptools>=75.0"]
 build-backend = "setuptools.build_meta"

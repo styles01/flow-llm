@@ -12,7 +12,7 @@ Prioritized implementation checklist.
 - [x] Initialize React project with Vite + Tailwind + TanStack Query
 - [x] Test llama.cpp with Gemma 4 GGUF (system prompts, tool calling, streaming)
 - [x] Create FastAPI skeleton with health endpoint and CORS
-- [x] Create React skeleton with sidebar navigation and 5 pages
+- [x] Create React skeleton with sidebar navigation and 6 pages
 - [x] Create launch scripts (`start.sh`, `.vscode/launch.json`, `gemma4.sh`)
 
 ### Phase 1: Model Management
@@ -37,12 +37,16 @@ Prioritized implementation checklist.
 - [x] `/v1/models` OpenAI-compatible endpoint
 - [x] Stale state cleanup on restart
 - [x] Settings API (GET/PUT `/api/settings`)
+- [x] Persist settings to disk (`settings.json`)
+- [x] Backend version/update endpoints
+- [x] Download/log/activity observability endpoints
 
 ### Phase 3: Frontend
 - [x] Models page (HF search, local models, register GGUF, connect external)
-- [x] Running Models page (dashboard, memory bar, status)
+- [x] Running Models page (dashboard, memory bar, live slot/KV activity)
 - [x] Chat Test page (system prompt, streaming, tool calling, inline load)
-- [x] Settings page (loading defaults, hardware info, OpenClaw config)
+- [x] Logs page (backend stdout/stderr viewer)
+- [x] Settings page (loading defaults, backend versions/updates, hardware info, OpenClaw config)
 - [x] Telemetry page (request log table)
 - [x] Load dialog (context window, parallel slots, flash attention, KV cache, GPU layers)
 
@@ -52,11 +56,14 @@ Prioritized implementation checklist.
 - [x] Throughput calculation
 - [x] Telemetry storage (SQLite)
 - [x] Telemetry API endpoint
+- [x] Backend log capture + `/api/logs`
+- [x] Processing progress endpoint
+- [x] Live model activity endpoint
 
 ### Phase 5: OpenClaw Validation
-- [x] System prompts work through JAMES proxy
-- [x] Tool calling works through JAMES proxy
-- [x] Streaming SSE works through JAMES proxy
+- [x] System prompts work through the Flow proxy
+- [x] Tool calling works through the Flow proxy
+- [x] Streaming SSE works through the Flow proxy
 - [x] OpenClaw config shown in Settings page
 
 ---
@@ -71,14 +78,14 @@ Prioritized implementation checklist.
 
 ### Phase 6: Polish & Hardening
 - [ ] macOS launchd auto-start plist
-- [ ] Graceful shutdown with state persistence
+- [ ] Graceful shutdown with runtime state persistence
 - [ ] Backend crash detection + auto-restart with backoff
 - [ ] Clear error messages in frontend for all failure modes
 - [ ] OOM detection + model unload suggestion
 - [ ] Disk space management (show usage, warn at 80%)
 - [ ] Telemetry charts (TTFT over time, throughput comparison, model comparison)
 - [ ] Config export/import (share between machines)
-- [ ] WebSocket real-time updates (model status, download progress)
+- [ ] Frontend use of WebSocket real-time updates (replace polling for model/download status)
 - [ ] Full UX design review (visual hierarchy, type scale, interaction patterns)
 
 ### Bugs Fixed
@@ -93,7 +100,7 @@ Prioritized implementation checklist.
 - [x] HuggingFace search had no model card, file sizes, or download destination
 
 ### Design
-- [x] Rebrand from JAMES to Flow LLM
+- [x] Rebrand from the legacy name to Flow LLM
 - [x] Teal + magenta synthwave color scheme
 - [x] Bitcrushed waveform favicon and sidebar logo
 - [x] Model search results show instruct/vision/mlx badges

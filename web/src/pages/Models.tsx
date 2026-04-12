@@ -33,6 +33,7 @@ export default function ModelsPage() {
   const { data: models = [], isLoading: modelsLoading } = useQuery({
     queryKey: ['models'],
     queryFn: () => api.listModels(),
+    refetchInterval: 5000,
   })
 
   // Search HuggingFace
@@ -168,7 +169,7 @@ export default function ModelsPage() {
                 type="text"
                 value={registerPath}
                 onChange={e => setRegisterPath(e.target.value)}
-                placeholder="/Volumes/James4TBSSD/llms/model-Q4_K_M.gguf"
+                placeholder="/path/to/model-Q4_K_M.gguf"
                 className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-teal-500"
               />
               <input

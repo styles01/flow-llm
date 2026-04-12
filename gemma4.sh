@@ -2,10 +2,10 @@
 # gemma4.sh — Start Gemma 4 26B on llama-server with OpenClaw-ready settings
 #
 # Usage:
-#   ./gemma4.sh              # defaults: port 8081, 100K ctx/slot, LAN accessible
-#   ./gemma4.sh -p 8082      # custom port
-#   ./gemma4.sh -c 50000     # smaller context (50K per slot)
-#   ./gemma4.sh -l           # localhost only (no LAN access)
+#   ./gemma4.sh -m /path/to/model.gguf  # defaults: port 8081, 100K ctx/slot, LAN accessible
+#   ./gemma4.sh -m /path/to/model.gguf -p 8082
+#   MODEL_PATH=/path/to/model.gguf ./gemma4.sh -c 50000
+#   ./gemma4.sh -m /path/to/model.gguf -l  # localhost only (no LAN access)
 #
 # Note: -c sets usable context PER SLOT. The actual --ctx-size passed to
 # llama-server is multiplied by --parallel (default 2), so OpenClaw sees
@@ -18,7 +18,7 @@
 set -euo pipefail
 
 # --- Config ---
-MODEL="/Volumes/James4TBSSD/llms/gemma4-26b-q4/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf"
+MODEL="${MODEL_PATH:-}"
 PORT=8081
 CTX_PER_SLOT=100000  # usable context per slot (what OpenClaw sees)
 N_PARALLEL=2          # concurrent request slots
@@ -29,13 +29,15 @@ CACHE_TYPE_K="q4_0" # KV cache key quantization — saves ~75% memory vs f16
 CACHE_TYPE_V="q4_0" # KV cache value quantization — saves ~75% memory vs f16
 
 # --- Parse args ---
-while getopts "p:c:lh" opt; do
+while getopts "m:p:c:lh" opt; do
   case $opt in
+    m) MODEL="$OPTARG" ;;
     p) PORT="$OPTARG" ;;
     c) CTX_PER_SLOT="$OPTARG" ;;
     l) HOST="127.0.0.1" ;;   # localhost only
     h)
-      echo "Usage: $0 [-p PORT] [-c CTX_SIZE] [-l] [-h]"
+      echo "Usage: $0 -m MODEL_PATH [-p PORT] [-c CTX_SIZE] [-l] [-h]"
+      echo "  -m MODEL    Path to the GGUF model file"
       echo "  -p PORT     Port number (default: 8081)"
       echo "  -c CTX      Usable context per slot in tokens (default: 100000)"
       echo "  -l          Listen on localhost only (no LAN access)"
@@ -47,9 +49,15 @@ while getopts "p:c:lh" opt; do
 done
 
 # --- Validate ---
+if [[ -z "$MODEL" ]]; then
+  echo "ERROR: No model path provided."
+  echo "Use -m /path/to/model.gguf or set MODEL_PATH=/path/to/model.gguf"
+  exit 1
+fi
+
 if [[ ! -f "$MODEL" ]]; then
   echo "ERROR: Model file not found: $MODEL"
-  echo "Update the MODEL path in this script."
+  echo "Pass a valid path with -m or MODEL_PATH."
   exit 1
 fi
 

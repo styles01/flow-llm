@@ -1,6 +1,13 @@
-server/james/__pycache__/
-server/james.egg-info/
-web/dist/
-node_modules/
 __pycache__/
+*.pyc
+*.pyo
+server/*.egg-info/
+web/dist/
+web/node_modules/
+node_modules/
+.flow.pid
+server/logs/
 .env
+.env.*
+.DS_Store
+.claude/

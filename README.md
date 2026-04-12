@@ -1,6 +1,6 @@
 # Flow LLM — macOS LLM Orchestration
 
-Local LLM gateway for OpenClaw on Apple Silicon.
+Local LLM gateway for OpenClaw on Apple Silicon. Flow manages local models, proxies OpenAI-compatible requests, and exposes telemetry, logs, and backend update controls for local inference backends.
 
 ## Prerequisites
 
@@ -40,14 +40,14 @@ mlx-openai-server --help  # Should print help (optional, skip if not using MLX)
 ### 1. Install Python dependencies
 
 ```bash
-cd ~/JAMES-LLM/server
+cd server
 pip install -e .
 ```
 
 ### 2. Start the backend
 
 ```bash
-python3 -m james.main
+flow
 ```
 
 Server starts on **http://localhost:3377**
@@ -55,7 +55,7 @@ Server starts on **http://localhost:3377**
 ### 3. Start the frontend (dev mode)
 
 ```bash
-cd ~/JAMES-LLM/web
+cd web
 npm install
 npm run dev
 ```
@@ -65,8 +65,8 @@ Frontend at **http://localhost:5173** (proxies API to backend)
 Or build and serve from the backend:
 
 ```bash
-cd ~/JAMES-LLM/web && npm run build
-cd ~/JAMES-LLM/server && python3 -m james.main
+cd web && npm run build
+cd ../server && flow
 # Everything at http://localhost:3377
 ```
 
@@ -83,7 +83,7 @@ Or register a local GGUF file and load through Flow:
 ```bash
 curl -X POST http://localhost:3377/api/register-local \
   -H "Content-Type: application/json" \
-  -d '{"gguf_path": "/Volumes/James4TBSSD/llms/gemma4-26b-q4/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf"}'
+  -d '{"gguf_path": "/path/to/model.gguf"}'
 ```
 
 Then load it in the UI with your preferred settings (100K context, flash attention, q4_0 KV cache).
@@ -96,9 +96,9 @@ Point OpenClaw to Flow:
 {
   "models": {
     "providers": {
-      "james": {
+      "flow": {
         "baseUrl": "http://127.0.0.1:3377/v1",
-        "apiKey": "james-local",
+        "apiKey": "flow-local",
         "api": "openai-completions"
       }
     }
@@ -138,23 +138,25 @@ Point OpenClaw to Flow:
 
 ## Architecture
 
-See [architecture.md](architecture.md) for the full design.
+See [docs/architecture.md](docs/architecture.md) for the full design.
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `server/james/main.py` | FastAPI app with all API routes |
-| `server/james/process_manager.py` | Starts/stops llama.cpp and mlx-openai-server; also manages external processes |
-| `server/james/hf_client.py` | HuggingFace search and download |
-| `server/james/template_validator.py` | Validates chat templates before loading |
-| `server/james/database.py` | SQLite model registry |
-| `server/james/hardware.py` | Apple Silicon detection |
-| `server/james/config.py` | Default settings (port 3377, 100K context, flash attention, q4_0 KV cache) |
+| `server/flow_llm/main.py` | FastAPI app with all API routes |
+| `server/flow_llm/process_manager.py` | Starts/stops llama.cpp and mlx-openai-server; also manages external processes |
+| `server/flow_llm/hf_client.py` | HuggingFace search and download |
+| `server/flow_llm/template_validator.py` | Validates chat templates before loading |
+| `server/flow_llm/database.py` | SQLite model registry |
+| `server/flow_llm/hardware.py` | Apple Silicon detection |
+| `server/flow_llm/config.py` | Default and persisted settings (port 3377, load defaults, auto-update toggle) |
+| `server/flow_llm/updater.py` | Backend version detection and update helpers for llama.cpp and mlx-openai-server |
 | `web/src/pages/Models.tsx` | Model management with HF search, local registration, connect external |
 | `web/src/pages/Chat.tsx` | Chat test with system prompt editor, streaming SSE, tool calling |
-| `web/src/pages/Running.tsx` | Running models dashboard with memory bar |
-| `web/src/pages/Settings.tsx` | Model loading defaults, hardware info, OpenClaw config |
+| `web/src/pages/Running.tsx` | Running models dashboard with memory bar and live slot/KV activity |
+| `web/src/pages/Logs.tsx` | Backend log viewer with per-model filtering |
+| `web/src/pages/Settings.tsx` | Persisted load defaults, backend versions, update controls, hardware info |
 | `web/src/pages/Telemetry.tsx` | Request log table |
 | `web/src/components/LoadDialog.tsx` | Model loading controls (context, parallel slots, flash attention, KV cache) |
 | `web/src/api/client.ts` | API client for frontend |
@@ -190,9 +192,16 @@ See [architecture.md](architecture.md) for the full design.
 | POST | `/api/connect-external` | Connect to an already-running backend |
 | GET | `/api/settings` | Get default model loading settings |
 | PUT | `/api/settings` | Update default settings |
+| GET | `/api/downloads` | Get active/recent download progress |
 | GET | `/api/hf/search?q=` | Search HuggingFace models |
 | GET | `/api/hf/model/{id}` | Get HuggingFace model details |
 | GET | `/api/telemetry` | Get telemetry records |
+| GET | `/api/backend-versions` | Get installed/latest backend versions |
+| POST | `/api/check-updates` | Trigger backend version check |
+| POST | `/api/update-backend/{backend}` | Trigger backend update |
+| GET | `/api/processing-progress` | Get prefill progress for active models |
+| GET | `/api/logs` | Get recent backend logs |
+| GET | `/api/model-activity` | Get live per-slot activity and llama.cpp metrics |
 | GET | `/api/health` | Health check |
 
 ### OpenAI-Compatible Proxy
@@ -201,6 +210,12 @@ See [architecture.md](architecture.md) for the full design.
 |--------|----------|---------|
 | POST | `/v1/chat/completions` | Route to backend by model name (streaming + non-streaming) |
 | GET | `/v1/models` | List available models |
+
+### WebSocket
+
+| Endpoint | Purpose |
+|----------|---------|
+| `/ws` | Real-time lifecycle events (`model_loaded`, `model_unloaded`, `model_downloaded`, `model_deleted`) |
 
 ## Connect External Backend
 
@@ -223,5 +238,6 @@ Flow ships with sensible defaults for Apple Silicon:
 - **KV cache**: q4_0 quantization (75% memory savings, enables 100K context on 48GB)
 - **GPU layers**: -1 (all layers on Metal)
 - **Parallel slots**: 2 (for concurrent agent requests)
+- **Auto-update backends**: On (checks versions on startup and can auto-upgrade supported installs)
 
-These can be changed in the Settings page and are used as defaults in the Load dialog.
+These can be changed in the Settings page, are used as defaults in the Load dialog and Chat page, and are persisted to `~/.flow/settings.json`.

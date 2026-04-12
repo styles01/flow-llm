@@ -1,4 +1,4 @@
-"""JAMES — FastAPI application with management API and OpenAI-compatible proxy."""
+"""Flow LLM FastAPI application with management API and OpenAI-compatible proxy."""
 
 import asyncio
 import logging
@@ -14,12 +14,12 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from james.config import settings
-from james.database import Model, Telemetry, init_db
-from james.hardware import get_hardware_info, estimate_model_memory
-from james.hf_client import HuggingFaceClient
-from james.process_manager import process_manager, BackendProcess
-from james.template_validator import validate_model_dir
+from flow_llm.config import settings
+from flow_llm.database import Model, Telemetry, init_db
+from flow_llm.hardware import get_hardware_info, estimate_model_memory
+from flow_llm.hf_client import HuggingFaceClient
+from flow_llm.process_manager import process_manager, BackendProcess
+from flow_llm.template_validator import validate_model_dir
 
 logger = logging.getLogger(__name__)
 
@@ -74,13 +74,13 @@ class SearchRequest(BaseModel):
 
 async def _auto_detect_backends():
     """Scan common ports for already-running llama-server or mlx-openai-server instances
-    and auto-connect them to JAMES."""
+    and auto-connect them to Flow LLM."""
     import httpx
 
     # Check the llama.cpp port range and the common manual port (8081)
     ports_to_check = list(set([8081] + list(range(settings.llamacpp_port_range[0], settings.llamacpp_port_range[1] + 1))))
 
-    print(f"[JAMES] Auto-detecting backends on ports: {ports_to_check}")
+    print(f"[Flow] Auto-detecting backends on ports: {ports_to_check}")
     connected = []
     for port in ports_to_check:
         # Skip our own server port
@@ -104,12 +104,12 @@ async def _auto_detect_backends():
             else:
                 stem = model_name
 
-            print(f"[JAMES] Auto-detected backend on port {port}: {model_name} (stem: {stem})")
+            print(f"[Flow] Auto-detected backend on port {port}: {model_name} (stem: {stem})")
             logger.info(f"Auto-detected backend on port {port}: {model_name} (stem: {stem})")
 
             # Check if already tracked (by either name)
             if process_manager.get_process(model_name) or process_manager.get_process(stem):
-                print(f"[JAMES] Already tracked, skipping: {stem}")
+                print(f"[Flow] Already tracked, skipping: {stem}")
                 logger.info(f"Already tracked, skipping: {stem}")
                 continue
 
@@ -133,7 +133,7 @@ async def _auto_detect_backends():
                     model.port = port
                     model.pid = None  # external process, we don't track PID
                     session.commit()
-                    print(f"[JAMES] Matched to DB model: {db_id}")
+                    print(f"[Flow] Matched to DB model: {db_id}")
                 else:
                     # Create a new DB entry for this detected model
                     model = Model(
@@ -145,7 +145,7 @@ async def _auto_detect_backends():
                     )
                     session.add(model)
                     session.commit()
-                    print(f"[JAMES] Created new DB entry for: {stem}")
+                    print(f"[Flow] Created new DB entry for: {stem}")
             finally:
                 session.close()
 
@@ -156,7 +156,7 @@ async def _auto_detect_backends():
                 base_url=url,
                 port=port,
             )
-            print(f"[JAMES] Registered external backend: {db_id} on port {port}")
+            print(f"[Flow] Registered external backend: {db_id} on port {port}")
             logger.info(f"Registered external backend: {db_id} on port {port}")
 
             connected.append(f"{db_id} on :{port}")
@@ -174,6 +174,7 @@ async def lifespan(app: FastAPI):
 
     # Startup
     settings.ensure_dirs()
+    settings.load_from_disk()
     db_session_factory = init_db(settings.db_path)
     hf_client = HuggingFaceClient(token=None)  # TODO: load from config
 
@@ -194,6 +195,10 @@ async def lifespan(app: FastAPI):
     # Auto-detect running backends on common ports
     await _auto_detect_backends()
 
+    # Check for backend updates (non-blocking — runs in background)
+    from flow_llm.updater import check_and_autoupdate
+    asyncio.create_task(check_and_autoupdate(auto_update=settings.auto_update_backends))
+
     logger.info("Flow LLM started — data dir: %s", settings.data_dir)
 
     yield
@@ -201,7 +206,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down backends...")
     await process_manager.stop_all()
-    logger.info("JAMES stopped.")
+    logger.info("Flow LLM stopped.")
 
 
 # --- App ---
@@ -497,7 +502,7 @@ async def scan_local_models():
     This finds models that were downloaded manually (e.g., via gemma4.sh)
     and registers them in the database.
     """
-    from james.config import settings
+    from flow_llm.config import settings
     session = db_session_factory()
     found = []
 
@@ -518,7 +523,7 @@ async def scan_local_models():
             size_gb = round(gguf_path.stat().st_size / (1024**3), 2)
 
             # Validate template (GGUF files have templates embedded)
-            from james.template_validator import validate_model_dir
+            from flow_llm.template_validator import validate_model_dir
             validation = validate_model_dir(gguf_path.parent)
 
             model = Model(
@@ -568,7 +573,7 @@ async def register_local_model(request: RegisterLocalRequest):
     """Register a local GGUF file that's already on disk (e.g., downloaded manually).
 
     This is for models like the one used in gemma4.sh that were downloaded
-    outside of JAMES.
+    outside of Flow LLM.
     """
     path = Path(request.gguf_path)
     if not path.exists():
@@ -587,7 +592,7 @@ async def register_local_model(request: RegisterLocalRequest):
         model_id = path.stem
 
         # Validate template
-        from james.template_validator import validate_model_dir
+        from flow_llm.template_validator import validate_model_dir
         validation = validate_model_dir(path.parent)
 
         size_gb = round(path.stat().st_size / (1024**3), 2)
@@ -622,10 +627,10 @@ class ConnectExternalRequest(BaseModel):
 
 @app.post("/api/connect-external")
 async def connect_external_model(request: ConnectExternalRequest):
-    """Connect JAMES to an already-running backend (e.g. llama-server started manually).
+    """Connect Flow LLM to an already-running backend (e.g. llama-server started manually).
 
     This lets you use models that are already loaded without restarting them.
-    JAMES will proxy requests to the external backend and track it as a running model.
+    Flow LLM will proxy requests to the external backend and track it as a running model.
     """
     import httpx
 
@@ -789,7 +794,7 @@ async def load_model(model_id: str, request: ModelLoadRequest):
 @app.post("/api/models/{model_id}/unload")
 async def unload_model(model_id: str):
     """Unload a model (stop its backend process, freeing memory)."""
-    print(f"[JAMES] unload_model('{model_id}') called")
+    print(f"[Flow] unload_model('{model_id}') called")
     session = db_session_factory()
     try:
         model = session.query(Model).filter(Model.id == model_id).first()
@@ -799,22 +804,22 @@ async def unload_model(model_id: str):
             raise HTTPException(400, f"Model {model_id} is not running")
 
         port = model.port  # Save port before clearing status
-        print(f"[JAMES] Model {model_id} is running on port {port}")
+        print(f"[Flow] Model {model_id} is running on port {port}")
         logger.info(f"Unloading model {model_id} on port {port}")
 
         # Try stopping by model_id first, then try with .gguf suffix
         stopped = await process_manager.stop_model(model_id)
-        print(f"[JAMES] stop_model('{model_id}') = {stopped}")
+        print(f"[Flow] stop_model('{model_id}') = {stopped}")
         if not stopped:
             stopped = await process_manager.stop_model(model_id + ".gguf")
-            print(f"[JAMES] stop_model('{model_id}.gguf') = {stopped}")
+            print(f"[Flow] stop_model('{model_id}.gguf') = {stopped}")
 
         # If process_manager doesn't know about it, kill whatever is on that port
         if not stopped and port:
-            print(f"[JAMES] Model not in process manager, killing port {port} directly")
+            print(f"[Flow] Model not in process manager, killing port {port} directly")
             logger.info(f"Model not in process manager, killing port {port} directly")
             stopped = await process_manager._kill_port(port)
-            print(f"[JAMES] _kill_port({port}) = {stopped}")
+            print(f"[Flow] _kill_port({port}) = {stopped}")
 
         model.status = "available"
         model.port = None
@@ -919,7 +924,7 @@ async def chat_completions(request: dict):
     to the correct backend process, collects telemetry, and streams
     responses transparently — no prompt modification.
     """
-    from james.process_manager import reset_processing_progress, _processing_progress
+    from flow_llm.process_manager import reset_processing_progress
     model_name = request.get("model", "")
     proc = process_manager.get_process(model_name)
 
@@ -978,7 +983,7 @@ async def chat_completions(request: dict):
             finally:
                 await client.aclose()
                 # Clear processing progress
-                _processing_progress.pop(model_name, None)
+                reset_processing_progress(model_name)
             end_time = time.monotonic()
             ttft_ms = (first_token_time - start_time) * 1000 if first_token_time else None
             elapsed_sec = (end_time - start_time) if first_token_time else None
@@ -1042,7 +1047,7 @@ async def list_available_models():
             "id": model_id,
             "object": "model",
             "created": int(time.time()),
-            "owned_by": "james",
+            "owned_by": "flow",
         })
     return {"object": "list", "data": data}
 
@@ -1088,6 +1093,7 @@ class UpdateSettingsRequest(BaseModel):
     default_cache_type_v: Optional[str] = None
     default_gpu_layers: Optional[int] = None
     default_n_parallel: Optional[int] = None
+    auto_update_backends: Optional[bool] = None
 
 
 @app.get("/api/settings")
@@ -1101,6 +1107,7 @@ async def get_settings():
         "default_gpu_layers": settings.default_gpu_layers,
         "default_n_parallel": settings.default_n_parallel,
         "models_dir": str(settings.models_dir),
+        "auto_update_backends": settings.auto_update_backends,
     }
 
 
@@ -1119,7 +1126,39 @@ async def update_settings(request: UpdateSettingsRequest):
         settings.default_gpu_layers = request.default_gpu_layers
     if request.default_n_parallel is not None:
         settings.default_n_parallel = request.default_n_parallel
+    if request.auto_update_backends is not None:
+        settings.auto_update_backends = request.auto_update_backends
+    settings.save_to_disk()
     return {"status": "ok"}
+
+
+@app.get("/api/backend-versions")
+async def get_backend_versions():
+    """Get current and latest versions of llama.cpp and mlx-openai-server."""
+    from flow_llm.updater import get_versions
+    versions = get_versions()
+    return {k: v.to_dict() for k, v in versions.items()}
+
+
+@app.post("/api/check-updates")
+async def check_updates_now():
+    """Trigger an immediate version check (and optional update) of backends."""
+    from flow_llm.updater import check_and_autoupdate
+    asyncio.create_task(check_and_autoupdate(auto_update=settings.auto_update_backends))
+    return {"status": "checking"}
+
+
+@app.post("/api/update-backend/{backend}")
+async def update_backend(backend: str):
+    """Manually trigger an update for a specific backend (llamacpp or mlx)."""
+    from flow_llm.updater import update_llamacpp, update_mlx
+    if backend == "llamacpp":
+        asyncio.create_task(update_llamacpp())
+    elif backend == "mlx":
+        asyncio.create_task(update_mlx())
+    else:
+        raise HTTPException(400, f"Unknown backend: {backend}")
+    return {"status": "updating"}
 
 
 @app.get("/api/health")
@@ -1136,7 +1175,7 @@ async def health():
 @app.get("/api/processing-progress")
 async def processing_progress():
     """Get processing progress for all models currently processing."""
-    from james.process_manager import get_processing_progress
+    from flow_llm.process_manager import get_processing_progress
     running = process_manager.get_all_processes()
     progress = {}
     for model_id in running:
@@ -1149,9 +1188,76 @@ async def processing_progress():
 @app.get("/api/logs")
 async def get_logs(model_id: Optional[str] = None, lines: int = 200):
     """Get recent backend process logs."""
-    from james.process_manager import get_logs as get_pm_logs
+    from flow_llm.process_manager import get_logs as get_pm_logs
     logs = get_pm_logs(model_id=model_id, lines=min(lines, 2000))
     return {"logs": logs}
+
+
+def _parse_prometheus_metrics(text: str) -> dict[str, float]:
+    """Parse Prometheus text format into a flat dict of metric name -> value."""
+    import re
+    metrics: dict[str, float] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        # Strip labels: "metric{label=value} 1.0" → "metric" -> 1.0
+        m = re.match(r'^([a-zA-Z_:][a-zA-Z0-9_:]*?)(?:\{[^}]*\})?\s+([-\d.eE+]+)', line)
+        if m:
+            try:
+                metrics[m.group(1)] = float(m.group(2))
+            except ValueError:
+                pass
+    return metrics
+
+
+@app.get("/api/model-activity")
+async def model_activity():
+    """Get live per-model activity: per-slot prefill/generation state + metrics."""
+    from flow_llm.process_manager import get_slot_states
+
+    running = process_manager.get_all_processes()
+    activity: dict[str, dict] = {}
+
+    async with httpx.AsyncClient(timeout=1.0) as client:
+        for model_id, proc in running.items():
+            port = getattr(proc, "port", None)
+
+            # Per-slot state from log parsing (prefill progress, generating)
+            slots = get_slot_states(model_id)
+            slots_list = [
+                {"slot_id": sid, "state": s["state"], "progress": s["progress"]}
+                for sid, s in sorted(slots.items())
+                if s["state"] != "idle"
+            ]
+
+            info: dict = {
+                "slots": slots_list,
+                "slots_processing": None,
+                "slots_deferred": None,
+                "tokens_per_sec": None,
+                "kv_cache_usage": None,
+            }
+
+            # Supplement with Prometheus metrics from llama-server
+            if port:
+                try:
+                    resp = await client.get(f"http://127.0.0.1:{port}/metrics")
+                    if resp.status_code == 200:
+                        m = _parse_prometheus_metrics(resp.text)
+                        info["slots_processing"] = int(m.get("llamacpp:requests_processing", 0))
+                        info["slots_deferred"] = int(m.get("llamacpp:requests_deferred", 0))
+                        info["tokens_per_sec"] = (
+                            m.get("llamacpp:tokens_per_second")
+                            or m.get("llamacpp:token_generation_speed")
+                        )
+                        info["kv_cache_usage"] = m.get("llamacpp:kv_cache_usage_ratio")
+                except Exception:
+                    pass
+
+            activity[model_id] = info
+
+    return {"activity": activity}
 
 
 # --- Serve frontend ---
@@ -1177,7 +1283,7 @@ def main():
     """Run the Flow LLM server."""
     import uvicorn
     uvicorn.run(
-        "james.main:app",
+        "flow_llm.main:app",
         host=settings.host,
         port=settings.port,
         reload=False,

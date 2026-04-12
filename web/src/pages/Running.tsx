@@ -1,6 +1,85 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '../api/client'
+import { api, type ModelActivity } from '../api/client'
 import { EmptyState } from '../components/EmptyState'
+
+function ActivityStrip({ activity }: { activity: ModelActivity | undefined }) {
+  const activeSlots = activity?.slots ?? []
+  const { slots_deferred, tokens_per_sec, kv_cache_usage } = activity ?? {}
+
+  const generatingSlots = activeSlots.filter(s => s.state === 'generating')
+  const prefillSlots = activeSlots.filter(s => s.state === 'prefill')
+  const isIdle = activeSlots.length === 0 && !slots_deferred
+
+  return (
+    <div className="mt-3 pt-3 border-t border-gray-800 space-y-2">
+
+      {/* Per-slot prefill progress bars */}
+      {prefillSlots.map(slot => (
+        <div key={slot.slot_id} className="flex items-center gap-2">
+          <span className="text-xs text-gray-500 w-12 shrink-0">
+            slot {slot.slot_id}
+          </span>
+          <div className="flex-1 bg-gray-800 rounded-full h-2 overflow-hidden">
+            <div
+              className="h-2 bg-amber-400 rounded-full transition-all duration-300"
+              style={{ width: `${slot.progress * 100}%` }}
+            />
+          </div>
+          <span className="text-xs text-amber-400 w-10 text-right shrink-0">
+            {Math.round(slot.progress * 100)}%
+          </span>
+          <span className="text-xs text-gray-500 shrink-0">prefill</span>
+        </div>
+      ))}
+
+      {/* Generating slots */}
+      {generatingSlots.map(slot => (
+        <div key={slot.slot_id} className="flex items-center gap-2 text-xs">
+          <span className="text-gray-500 w-12 shrink-0">slot {slot.slot_id}</span>
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-teal-400 animate-ping shrink-0" />
+          <span className="text-teal-400">Generating</span>
+          {tokens_per_sec != null && tokens_per_sec > 0 && (
+            <span className="text-gray-400">{tokens_per_sec.toFixed(1)} tok/s</span>
+          )}
+        </div>
+      ))}
+
+      {/* Queued turns */}
+      {slots_deferred != null && slots_deferred > 0 && (
+        <div className="flex items-center gap-2 text-xs text-gray-500">
+          <span className="w-12 shrink-0" />
+          <span>{slots_deferred} turn{slots_deferred > 1 ? 's' : ''} queued</span>
+        </div>
+      )}
+
+      {/* Idle */}
+      {isIdle && (
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-gray-600">Idle</span>
+          {kv_cache_usage != null && kv_cache_usage > 0.02 && (
+            <span className="text-gray-600 ml-2">
+              KV {Math.round(kv_cache_usage * 100)}% used
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* KV cache bar (when active) */}
+      {!isIdle && kv_cache_usage != null && kv_cache_usage > 0.02 && (
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-gray-600 w-12 shrink-0">KV cache</span>
+          <div className="w-24 bg-gray-800 rounded-full h-1.5">
+            <div
+              className={`h-1.5 rounded-full transition-all ${kv_cache_usage > 0.85 ? 'bg-fuchsia-500' : 'bg-gray-600'}`}
+              style={{ width: `${kv_cache_usage * 100}%` }}
+            />
+          </div>
+          <span className="text-gray-600">{Math.round(kv_cache_usage * 100)}%</span>
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function RunningPage() {
   const queryClient = useQueryClient()
@@ -8,6 +87,12 @@ export default function RunningPage() {
     queryKey: ['running'],
     queryFn: () => api.listRunning(),
     refetchInterval: 5000,
+  })
+
+  const { data: activityData } = useQuery({
+    queryKey: ['model-activity'],
+    queryFn: () => api.getModelActivity(),
+    refetchInterval: 1000,
   })
 
   const unloadMut = useMutation({
@@ -114,6 +199,7 @@ export default function RunningPage() {
                   </button>
                 </div>
               </div>
+              <ActivityStrip activity={activityData?.activity[m.model_id]} />
             </div>
           ))}
         </div>

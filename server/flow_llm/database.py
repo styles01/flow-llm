@@ -1,4 +1,4 @@
-"""SQLAlchemy models for JAMES model registry."""
+"""SQLAlchemy models for the Flow LLM model registry."""
 
 from datetime import datetime
 from pathlib import Path

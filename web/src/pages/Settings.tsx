@@ -1,7 +1,67 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '../api/client'
+import { api, type ComponentVersion } from '../api/client'
 import { formatError } from '../utils/errors'
+
+function VersionRow({ label, v, onUpdate }: { label: string; v: ComponentVersion; onUpdate: () => void }) {
+  const statusColor = v.error && v.install_method === 'not_found'
+    ? 'text-gray-500'
+    : v.update_available
+      ? 'text-amber-400'
+      : 'text-green-400'
+
+  return (
+    <div className="flex items-start justify-between gap-4 py-3 border-b border-gray-800 last:border-0">
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-gray-200">{label}</p>
+        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+          {v.install_method === 'not_found' ? (
+            <span className="text-xs text-gray-500">not installed</span>
+          ) : (
+            <>
+              <span className="text-xs font-mono text-gray-400">
+                {v.current ?? 'unknown'} installed
+              </span>
+              {v.latest && (
+                <span className={`text-xs font-mono ${statusColor}`}>
+                  {v.update_available ? `→ ${v.latest} available` : '(up to date)'}
+                </span>
+              )}
+              {v.install_method === 'brew' && (
+                <span className="text-xs px-1.5 py-0.5 bg-orange-900/40 text-orange-300 rounded">brew</span>
+              )}
+              {v.install_method === 'pip' && (
+                <span className="text-xs px-1.5 py-0.5 bg-blue-900/40 text-blue-300 rounded">pip</span>
+              )}
+            </>
+          )}
+          {v.error && v.install_method !== 'not_found' && (
+            <span className="text-xs text-red-400">{v.error}</span>
+          )}
+        </div>
+        {v.updating && (
+          <p className="text-xs text-teal-400 mt-1 animate-pulse">Updating...</p>
+        )}
+        {v.update_log.length > 0 && !v.updating && (
+          <details className="mt-1">
+            <summary className="text-xs text-gray-500 cursor-pointer">Update log</summary>
+            <pre className="text-xs text-gray-500 mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap break-all">
+              {v.update_log.join('\n')}
+            </pre>
+          </details>
+        )}
+      </div>
+      {v.update_available && !v.updating && v.install_method !== 'not_found' && (
+        <button
+          onClick={onUpdate}
+          className="px-3 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded text-xs font-medium whitespace-nowrap"
+        >
+          Update now
+        </button>
+      )}
+    </div>
+  )
+}
 
 export default function SettingsPage() {
   const queryClient = useQueryClient()
@@ -10,12 +70,19 @@ export default function SettingsPage() {
 
   const { data: savedSettings } = useQuery({ queryKey: ['settings'], queryFn: () => api.getSettings() })
 
+  const { data: versions, refetch: refetchVersions } = useQuery({
+    queryKey: ['backend-versions'],
+    queryFn: () => api.getBackendVersions(),
+    refetchInterval: 10000,  // re-poll while updates are running
+  })
+
   const [ctxSize, setCtxSize] = useState(100000)
   const [flashAttn, setFlashAttn] = useState('on')
   const [cacheTypeK, setCacheTypeK] = useState('q4_0')
   const [cacheTypeV, setCacheTypeV] = useState('q4_0')
   const [gpuLayers, setGpuLayers] = useState(-1)
   const [nParallel, setNParallel] = useState(2)
+  const [autoUpdate, setAutoUpdate] = useState(true)
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
@@ -26,6 +93,7 @@ export default function SettingsPage() {
       setCacheTypeV(savedSettings.default_cache_type_v)
       setGpuLayers(savedSettings.default_gpu_layers)
       setNParallel(savedSettings.default_n_parallel)
+      setAutoUpdate(savedSettings.auto_update_backends ?? true)
     }
   }, [savedSettings])
 
@@ -37,12 +105,23 @@ export default function SettingsPage() {
       default_cache_type_v: cacheTypeV,
       default_gpu_layers: gpuLayers,
       default_n_parallel: nParallel,
+      auto_update_backends: autoUpdate,
     }),
     onSuccess: () => {
       setSaved(true)
       queryClient.invalidateQueries({ queryKey: ['settings'] })
       setTimeout(() => setSaved(false), 2000)
     },
+  })
+
+  const checkUpdatesMut = useMutation({
+    mutationFn: () => api.checkUpdates(),
+    onSuccess: () => setTimeout(() => refetchVersions(), 3000),
+  })
+
+  const updateBackendMut = useMutation({
+    mutationFn: (backend: 'llamacpp' | 'mlx') => api.updateBackend(backend),
+    onSuccess: () => setTimeout(() => refetchVersions(), 5000),
   })
 
   const effectiveCtx = ctxSize * nParallel
@@ -180,6 +259,22 @@ export default function SettingsPage() {
             </p>
           </div>
 
+          {/* Auto-update toggle */}
+          <div className="flex items-center justify-between pt-2 border-t border-gray-800">
+            <div>
+              <p className="text-sm font-medium text-gray-300">Auto-update backends on startup</p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Automatically update llama.cpp and mlx-openai-server when newer versions are available.
+              </p>
+            </div>
+            <button
+              onClick={() => setAutoUpdate(v => !v)}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${autoUpdate ? 'bg-teal-600' : 'bg-gray-700'}`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${autoUpdate ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+
           {/* Save */}
           <div className="flex items-center gap-3 pt-2">
             <button
@@ -193,6 +288,47 @@ export default function SettingsPage() {
             {saveMut.isError && <span className="text-red-400 text-sm">Error: {formatError(saveMut.error)}</span>}
           </div>
         </div>
+      </section>
+
+      {/* Backend Versions */}
+      <section className="mb-8">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-lg font-semibold text-gray-300">Backend Versions</h3>
+          <button
+            onClick={() => checkUpdatesMut.mutate()}
+            disabled={checkUpdatesMut.isPending}
+            className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded-md text-sm"
+          >
+            {checkUpdatesMut.isPending ? 'Checking...' : 'Check for Updates'}
+          </button>
+        </div>
+        <div className="bg-gray-900 border border-gray-800 rounded-lg px-4 py-1">
+          {versions ? (
+            <>
+              {versions.llamacpp && (
+                <VersionRow
+                  label="llama.cpp (llama-server)"
+                  v={versions.llamacpp}
+                  onUpdate={() => updateBackendMut.mutate('llamacpp')}
+                />
+              )}
+              {versions.mlx && (
+                <VersionRow
+                  label="mlx-openai-server"
+                  v={versions.mlx}
+                  onUpdate={() => updateBackendMut.mutate('mlx')}
+                />
+              )}
+            </>
+          ) : (
+            <p className="text-sm text-gray-500 py-3">Checking versions...</p>
+          )}
+        </div>
+        {!autoUpdate && (
+          <p className="text-xs text-gray-500 mt-2">
+            Auto-update is off. Updates will not be applied automatically on startup.
+          </p>
+        )}
       </section>
 
       {/* Hardware */}

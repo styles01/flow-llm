@@ -2,12 +2,12 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "JAMES: Backend + Frontend",
+      "name": "Flow LLM: Backend + Frontend",
       "type": "node",
       "request": "launch",
       "compounds": [
         {
-          "name": "JAMES: Full Stack",
+          "name": "Flow LLM: Full Stack",
           "configurations": ["Backend", "Frontend"],
           "stopAll": true
         }
@@ -17,11 +17,11 @@
       "name": "Backend",
       "type": "debugpy",
       "request": "launch",
-      "module": "james.main",
+      "module": "flow_llm.main",
       "cwd": "${workspaceFolder}/server",
       "env": {
-        "JAMES_DATA_DIR": "${workspaceFolder}/.james-data",
-        "JAMES_MODELS_DIR": "/Volumes/James4TBSSD/llms"
+        "FLOW_DATA_DIR": "${workspaceFolder}/.flow-data",
+        "FLOW_MODELS_DIR": "${workspaceFolder}/.flow-models"
       }
     },
     {
@@ -36,7 +36,7 @@
   ],
   "compounds": [
     {
-      "name": "JAMES: Full Stack",
+      "name": "Flow LLM: Full Stack",
       "configurations": ["Backend", "Frontend"],
       "stopAll": true
     }

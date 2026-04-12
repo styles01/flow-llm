@@ -273,7 +273,7 @@ class HuggingFaceClient:
         }
 
         if local_dir is None:
-            from james.config import settings
+            from flow_llm.config import settings
             local_dir = str(settings.models_dir)
 
         # Ensure the download directory exists with the model name as subfolder

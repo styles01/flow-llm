@@ -15,7 +15,7 @@
 | Initialize React project (`web/` with Vite + React + Tailwind) | ✅ Done |
 | Test llama.cpp with Gemma 4 GGUF | ✅ Done — working with system prompts, tool calling, streaming |
 | Create FastAPI skeleton (`server/main.py`) | ✅ Done — all management API endpoints |
-| Create React skeleton | ✅ Done — all 5 pages with sidebar navigation |
+| Create React skeleton | ✅ Done — all 6 pages with sidebar navigation |
 | Validate Gemma 4 GGUF specifically | ✅ Done — template validator passes, tool calling works |
 
 ---
@@ -54,6 +54,9 @@
 | `/v1/models` endpoint | ✅ Done — OpenAI-compatible model listing |
 | Stale state cleanup on restart | ✅ Done — resets "running" models to "available" |
 | Settings API | ✅ Done — GET/PUT `/api/settings` for default loading params |
+| Settings persistence | ✅ Done — load defaults and auto-update flag saved to `settings.json` |
+| Backend version/update API | ✅ Done — startup checks plus manual update endpoints |
+| Live activity/log APIs | ✅ Done — downloads, logs, processing progress, per-slot activity |
 
 ---
 
@@ -64,9 +67,10 @@
 | Task | Status |
 |------|--------|
 | Model Browser page | ✅ Done — HF search, local models, register GGUF, connect external |
-| Running Models page | ✅ Done — dashboard with memory bar, status indicators |
+| Running Models page | ✅ Done — dashboard with memory bar, status indicators, live activity |
 | Chat Test page | ✅ Done — system prompt, streaming, tool calling, inline model loading |
-| Settings page | ✅ Done — loading defaults, hardware info, OpenClaw config |
+| Logs page | ✅ Done — backend log viewer with per-model filter |
+| Settings page | ✅ Done — loading defaults, backend versions/updates, hardware info, OpenClaw config |
 | Telemetry page | ✅ Done — request log table |
 | Load dialog | ✅ Done — context window, parallel slots, flash attention, KV cache, GPU layers |
 
@@ -94,8 +98,8 @@
 | Task | Status |
 |------|--------|
 | OpenClaw config generator | ✅ Shown in Settings page |
-| System prompt validation | ✅ Verified — Gemma 4 system prompts work through JAMES |
-| Tool calling validation | ✅ Verified — Gemma 4 tool calling works through JAMES |
+| System prompt validation | ✅ Verified — Gemma 4 system prompts work through Flow |
+| Tool calling validation | ✅ Verified — Gemma 4 tool calling works through Flow |
 | Streaming test | ✅ Verified — SSE tokens arrive incrementally through proxy |
 | Fidelity test | ⬜ Not yet automated |
 | Long context test | ⬜ Not yet tested at 100K |
@@ -103,14 +107,15 @@
 
 ---
 
-## Phase 6: Polish & Hardening (Not Started)
+## Phase 6: Polish & Hardening (In Progress)
 
 **Goal:** Production-ready for daily use.
 
 | Task | Status |
 |------|--------|
 | Auto-start on login (macOS launchd) | ⬜ Not started |
-| Graceful shutdown | ⬜ Partial — backend stops, but no state persistence |
+| Graceful shutdown | ⬜ Partial — backend stops cleanly, settings persist, runtime state does not |
+| Backend version management | ✅ Done — startup checks, persisted auto-update toggle, manual update actions |
 | Error recovery (backend crash detection) | ⬜ Not started |
 | Disk space management | ⬜ Not started |
 | Config export/import | ⬜ Not started |

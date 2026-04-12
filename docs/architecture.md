@@ -54,10 +54,18 @@ The core issue: **the layer between the model and OpenClaw must be transparent**
 - React + Tailwind SPA for model management and testing
 - Model browser with HuggingFace search and local GGUF registration
 - Connect external running models without restart
-- Running models dashboard with memory/status
+- Running models dashboard with memory/status plus per-slot live activity
 - Chat test interface for validating system prompts and tool calls
+- Logs page for backend process output and debugging
 - Telemetry view (TTFT, throughput, token counts)
-- Settings page with model loading defaults
+- Settings page with persisted model loading defaults plus backend version/update controls
+
+### 2.6 Operational Visibility
+- Capture backend stdout/stderr into rotating per-model log buffers
+- Track slot-level prefill/generation state from llama-server logs
+- Poll llama-server Prometheus metrics for tokens/sec, queued turns, and KV cache usage
+- Persist load defaults and auto-update preferences to disk
+- Check backend versions on startup and expose manual update controls
 
 ---
 
@@ -66,12 +74,12 @@ The core issue: **the layer between the model and OpenClaw must be transparent**
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │                        Frontend (React SPA)                       │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌───────┐  ┌──────┐ │
-│  │  Models  │  │ Running  │  │  Chat    │  │Tele-  │  │Set-  │ │
-│  │  (HF +  │  │ Models   │  │  Test    │  │metry  │  │tings  │ │
-│  │  Local + │  │Dashboard │  │Interface │  │ View  │  │Config │ │
-│  │  Connect)│  │          │  │          │  │       │  │       │ │
-│  └──────────┘  └──────────┘  └──────────┘  └───────┘  └──────┘ │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌───────┐  ┌───────┐  ┌──────┐ │
+│  │  Models  │  │ Running  │  │  Chat    │  │ Logs  │  │Tele-  │  │Set-  │ │
+│  │  (HF +  │  │ Models   │  │  Test    │  │Viewer │  │metry  │  │tings  │ │
+│  │  Local + │  │Dashboard │  │Interface │  │       │  │ View  │  │Config │ │
+│  │  Connect)│  │ + Activity│ │          │  │       │  │       │  │+Updates│ │
+│  └──────────┘  └──────────┘  └──────────┘  └───────┘  └───────┘  └──────┘ │
 └──────────────────────────┬───────────────────────────────────────┘
                            │ REST API + WebSocket
 ┌──────────────────────────┴───────────────────────────────────────┐
@@ -148,27 +156,30 @@ OpenClaw sends standard OpenAI API requests. The proxy routes to whichever backe
 
 ### 4.1 Frontend (React + Tailwind)
 
-**Tech:** React 18, Tailwind CSS, Vite, TanStack Query
+**Tech:** React 19, Tailwind CSS, Vite, TanStack Query
 
 **Pages:**
 | Page | Purpose |
 |------|---------|
 | Models | Search HuggingFace, browse local models, register GGUF, connect external backends, download |
-| Running Models | See loaded models, memory usage, start/stop models |
+| Running Models | See loaded models, memory usage, per-slot prefill/generation state, queued turns, KV cache usage |
 | Chat Test | Send messages with system prompts, test tool calling, load models inline, streaming |
+| Logs | Inspect recent backend stdout/stderr with optional per-model filtering |
 | Telemetry | TTFT, tokens/sec, request logs |
-| Settings | Model loading defaults (context, flash attention, KV cache, parallel slots, GPU layers), hardware info, OpenClaw config |
+| Settings | Persisted model loading defaults, backend version/update controls, hardware info, OpenClaw config |
 
 **Key Features:**
 - Connect to already-running backends without restart
 - Register local GGUF files (e.g. on external SSD)
 - Model loading with configurable context window, flash attention, KV cache quantization
 - Memory pressure indicator
+- Backend log viewer and live slot activity dashboard
+- Backend version checks and manual update actions
 - Chat routes through Flow proxy for telemetry
 
 ### 4.2 Management Server (FastAPI)
 
-**Tech:** Python 3.12+, FastAPI, Pydantic v2, SQLAlchemy (SQLite), httpx
+**Tech:** Python 3.11+, FastAPI, Pydantic v2, SQLAlchemy (SQLite), httpx
 
 **Endpoints:**
 ```
@@ -177,6 +188,7 @@ GET    /api/models                # List local models
 GET    /api/models/running        # List running models (MUST be before /{id} route!)
 GET    /api/models/{id}          # Model details
 POST   /api/models/download      # Download from HF
+GET    /api/downloads            # Download progress
 DELETE /api/models/{id}          # Delete local model
 POST   /api/models/{id}/load     # Load model (start backend)
 POST   /api/models/{id}/unload   # Unload model (stop backend)
@@ -186,10 +198,17 @@ POST   /api/connect-external      # Connect to already-running backend
 GET    /api/settings              # Get default loading settings
 PUT    /api/settings              # Update default loading settings
 GET    /api/telemetry             # Get telemetry data
+GET    /api/backend-versions      # Installed/latest backend versions
+POST   /api/check-updates         # Trigger version check
+POST   /api/update-backend/{backend} # Update a backend
+GET    /api/processing-progress   # Legacy-compatible prefill progress
+GET    /api/logs                  # Recent backend logs
+GET    /api/model-activity        # Live slots + llama.cpp metrics
 GET    /api/hardware              # Get hardware info
 GET    /api/hf/search?q=          # Search HuggingFace
 GET    /api/hf/model/{id}         # Get HF model details
 GET    /api/health               # Health check
+WS     /ws                        # Lifecycle event stream
 
 # Proxy (for OpenClaw)
 POST   /v1/chat/completions      # Route to backend by model name
@@ -224,6 +243,8 @@ Manages backend processes and external connections:
 - **Unload kills external processes**: Uses `lsof` to find the PID on the model's port, sends SIGTERM (escalates to SIGKILL after 2s)
 - **Port allocation**: Dynamic ports in ranges 8081-8099 (GGUF) and 8100-8119 (MLX)
 - **Stale state cleanup**: On startup, resets models stuck in "running" to "available"
+- **Slot-state parsing**: Reads llama-server stderr to track per-slot prefill and generation state
+- **Log capture**: Stores stdout/stderr in rotating buffers exposed via `/api/logs`
 
 ### 4.4 Template Validator
 
@@ -249,7 +270,7 @@ This is the **critical component** that prevents LM Studio-style failures.
 
 ### 4.6 Settings System
 
-Default model loading parameters stored in memory (survives across the session, resets on restart):
+Default model loading parameters are persisted to `settings.json` in the data directory and loaded at startup:
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
@@ -259,8 +280,25 @@ Default model loading parameters stored in memory (survives across the session, 
 | `default_cache_type_v` | "q4_0" | KV cache value quantization |
 | `default_gpu_layers` | -1 | All layers on Metal GPU |
 | `default_n_parallel` | 2 | Concurrent request slots |
+| `auto_update_backends` | `true` | Check/apply supported backend updates on startup |
 
 Context size is multiplied by parallel slots internally (`ctx_size * n_parallel`) to compensate for llama-server dividing `--ctx-size` by `--parallel`.
+
+### 4.7 Backend Updater
+
+- Tracks both installed and latest versions of `llama.cpp` and `mlx-openai-server`
+- Detects `llama.cpp` install method so Homebrew installs can be upgraded automatically
+- Checks versions on startup in a background task
+- Exposes manual update triggers through `/api/check-updates` and `/api/update-backend/{backend}`
+- Surfaces update state and logs in the Settings page
+
+### 4.8 Observability and Live Activity
+
+- `/api/logs` returns recent backend stdout/stderr lines from rotating per-model buffers
+- `/api/processing-progress` provides a compatibility view of active prefill progress
+- `/api/model-activity` returns slot-level activity plus queued turns, tokens/sec, and KV cache metrics
+- For llama.cpp backends, metrics are pulled from `/metrics` and parsed from Prometheus text output
+- The Running page renders these signals as prefill bars, generating indicators, queue counts, and KV cache usage
 
 ---
 
@@ -343,6 +381,25 @@ OpenClaw sends POST /v1/chat/completions
     - Model name and backend type
 ```
 
+### 5.5 Backend Version Check and Update
+
+```
+Flow starts up
+  → Load persisted settings from settings.json
+  → check_and_autoupdate() runs in the background
+  → Detect installed versions of llama.cpp and mlx-openai-server
+  → Query latest versions (Homebrew / GitHub / PyPI)
+  → If auto-update is enabled:
+    1. brew upgrade llama.cpp (for Homebrew installs)
+    2. pip install --upgrade mlx-openai-server (for pip installs)
+  → Settings page polls /api/backend-versions to show status and logs
+
+User clicks "Check for Updates" or "Update now"
+  → Frontend → POST /api/check-updates or /api/update-backend/{backend}
+  → Background task runs without blocking the UI
+  → Update logs and status appear in Settings
+```
+
 ---
 
 ## 6. Hardware Profiles
@@ -352,10 +409,10 @@ OpenClaw sends POST /v1/chat/completions
 | Mini | M4 Mac Mini | 16 GB | Gemma 4 4B, Qwen 3 8B, Phi-4 Mini |
 | Max | M4 Max MacBook Pro | 48 GB | Gemma 4 26B, Qwen 3 32B, Llama 4 Scout |
 
-The management server detects the hardware profile on startup and adjusts:
-- Memory limits (warn if loading would exceed available RAM)
-- Recommended max model size (total RAM - 20% headroom - 8GB system)
-- Model recommendations (show models that fit)
+The management server detects the hardware profile on startup and exposes:
+- Total / used / available unified memory for the UI
+- A recommended max model size based on total RAM minus headroom
+- Memory estimates used by model-load admission checks
 
 ---
 

@@ -14,10 +14,11 @@ Flow (Just A Model Execution Server) is a local LLM gateway for running OpenClaw
 
 | Document | Purpose | Read When |
 |----------|---------|-----------|
-| `architecture.md` | System design, component breakdown, data flows, API spec | Starting any implementation work |
-| `project.md` | Phased plan with milestones and risk assessment | Planning a sprint or reviewing progress |
-| `todo.md` | Granular task checklist | Picking next task, checking what's done |
-| `docs.md` | This file — onboarding guide | Starting a new session |
+| [architecture.md](architecture.md) | System design, component breakdown, data flows, API spec | Starting any implementation work |
+| [project.md](project.md) | Phased plan with milestones and risk assessment | Planning a sprint or reviewing progress |
+| [todo.md](todo.md) | Granular task checklist | Picking next task, checking what's done |
+| [onboarding.md](onboarding.md) | This file — onboarding guide | Starting a new session |
+| [github-readiness.md](github-readiness.md) | Checklist for public release | Preparing to share on GitHub |
 
 ---
 
@@ -32,15 +33,18 @@ Flow (Just A Model Execution Server) is a local LLM gateway for running OpenClaw
 - Template validator (Jinja syntax, system role, tool calling)
 - Hardware detection (Apple Silicon, unified memory)
 - SQLite model registry
-- Settings API for model loading defaults
+- Settings API with persisted defaults (`settings.json`)
+- Backend updater/version API (`/api/backend-versions`, `/api/check-updates`, `/api/update-backend/{backend}`)
+- Observability APIs for downloads, logs, processing progress, and live model activity
 - Auto-reset stale "running" statuses on restart
 
 ### Frontend (React SPA) — Complete
 - **Models page**: HuggingFace search, local model list, register GGUF, connect external backend
-- **Running page**: Dashboard with memory bar, per-model status
+- **Running page**: Dashboard with memory bar, per-model status, slot activity, queued turns, KV cache usage
 - **Chat Test page**: System prompt editor, streaming responses, tool calling toggle, model loading from chat
+- **Logs page**: Backend stdout/stderr viewer with per-model filter
 - **Telemetry page**: Request log table
-- **Settings page**: Model loading defaults (context window, flash attention, KV cache, parallel slots, GPU layers), hardware info, OpenClaw config reference
+- **Settings page**: Persisted model loading defaults, backend versions, update controls, hardware info, OpenClaw config reference
 
 ### Infrastructure — Complete
 - `start.sh` for launching backend + frontend
@@ -75,8 +79,8 @@ OpenClaw → Flow Proxy (/v1/chat/completions) → Backend Server → Model
 - M4 Mac Mini 16GB — runs 10B class models (independent, not networked)
 
 ### Tech Stack
-- Backend: Python 3.12+, FastAPI, SQLAlchemy (SQLite), httpx, huggingface_hub, Jinja2
-- Frontend: React 18, Vite, Tailwind CSS, TanStack Query
+- Backend: Python 3.11+, FastAPI, SQLAlchemy (SQLite), httpx, huggingface_hub, Jinja2
+- Frontend: React 19, Vite, Tailwind CSS, TanStack Query
 - Inference backends: llama.cpp server (C++ binary), mlx-openai-server (Python pip)
 
 ---
@@ -85,17 +89,21 @@ OpenClaw → Flow Proxy (/v1/chat/completions) → Backend Server → Model
 
 ```
 Flow-LLM/
-├── architecture.md          # System design document
-├── project.md               # Phased project plan
-├── todo.md                  # Implementation checklist
-├── docs.md                  # This file
+├── docs/
+│   ├── architecture.md      # System design document
+│   ├── project.md           # Phased project plan
+│   ├── todo.md              # Implementation checklist
+│   ├── onboarding.md        # This file
+│   ├── changelog.md         # Development history
+│   ├── openclaw-architecture-plan.md  # OpenClaw inference design
+│   └── ux-redesign-plan.md  # UI redesign notes
 ├── start.sh                 # Launch script (backend + frontend)
-├── gemma4.sh                # Gemma 4 launch script for llama-server
 ├── server/                  # Python FastAPI backend
-│   ├── james/
+│   ├── flow_llm/
 │   │   ├── main.py           # FastAPI app with all routes
 │   │   ├── config.py        # Settings (port, defaults, paths)
 │   │   ├── process_manager.py # Backend process lifecycle + external connections
+│   │   ├── updater.py       # Backend version detection and update helpers
 │   │   ├── hf_client.py     # HuggingFace Hub integration
 │   │   ├── template_validator.py # Chat template validation
 │   │   ├── database.py      # SQLAlchemy models + registry
@@ -103,8 +111,9 @@ Flow-LLM/
 │   └── pyproject.toml
 ├── web/                     # React frontend
 │   ├── src/
-│   │   ├── pages/           # Models, Running, Chat, Telemetry, Settings
+│   │   ├── pages/           # Models, Running, Chat, Logs, Telemetry, Settings
 │   │   ├── components/      # LoadDialog
+│   │   ├── store/sessionStore.ts # Ephemeral route-persistent UI state
 │   │   └── api/client.ts    # API client
 │   └── vite.config.ts       # Proxy config for /api and /v1
 └── .vscode/launch.json      # Debug configuration
@@ -126,6 +135,8 @@ Flow-LLM/
 10. **100K context default** — OpenClaw is useless with small context windows. Default is 100K per slot × 2 parallel slots.
 11. **Unload kills the process** — For external models, unload doesn't just disconnect — it finds the PID on the model's port and sends SIGTERM (escalating to SIGKILL), freeing memory.
 12. **Auto-detect on startup** — Scans common ports for already-running backends and auto-connects them, so you don't have to manually register models every time.
+13. **Settings persist across restarts** — Load defaults and the auto-update toggle are stored in `settings.json` in the data directory.
+14. **Live activity is log/metrics driven** — The Running page combines slot state parsed from backend logs with llama.cpp `/metrics` output.
 
 ---
 
@@ -143,6 +154,7 @@ Flow-LLM/
 | Unload doesn't kill external models | Duplicate `stop_model` method — second version didn't call `_kill_port()` | Removed duplicate method, kept only version that kills processes |
 | Auto-detect model ID mismatch | Detected name didn't match DB entry (e.g. Q4_K_S vs Q4_K_M) | Fuzzy matching by ID, filename, and name; creates DB entry if no match |
 | Logger output not visible in uvicorn | Python logging not configured for process_manager | Added `print()` calls alongside `logger` for guaranteed visibility |
+| Settings reset on restart | Defaults were only held in memory | Settings now persist to `settings.json` and are loaded during startup |
 
 ---
 
@@ -152,9 +164,9 @@ Flow-LLM/
 {
   "models": {
     "providers": {
-      "james": {
+      "flow": {
         "baseUrl": "http://127.0.0.1:3377/v1",
-        "apiKey": "james-local",
+        "apiKey": "flow-local",
         "api": "openai-completions"
       }
     }
@@ -166,8 +178,9 @@ Flow-LLM/
 
 ## Getting Started
 
-1. Start backend: `cd server && python3 -m james.main`
+1. Start backend: `cd server && flow`
 2. Start frontend: `cd web && npm run dev`
 3. Open http://localhost:5173
 4. Connect an existing llama-server or register a local GGUF file
-5. Point OpenClaw to `http://127.0.0.1:3377/v1`
+5. Optionally review backend versions and auto-update behavior in Settings
+6. Point OpenClaw to `http://127.0.0.1:3377/v1`
