@@ -23,7 +23,7 @@ Prioritized implementation checklist.
 - [x] Download endpoint (`POST /api/models/download`)
 - [x] Register local GGUF (`POST /api/register-local`)
 - [x] Connect external backend (`POST /api/connect-external`)
-- [x] Scan local files (`POST /api/models/scan`)
+- [x] Scan local files (`POST /api/models/scan` — GGUF + MLX directory detection)
 - [x] Hardware detection (Apple Silicon, unified memory, Metal)
 
 ### Phase 2: Backend Lifecycle
@@ -47,13 +47,14 @@ Prioritized implementation checklist.
 - [x] Persist settings to disk (`settings.json`)
 - [x] Backend version/update endpoints
 - [x] Download/log/activity observability endpoints
+- [x] Legacy DB migration (JAMES → Flow)
 
 ### Phase 3: Frontend
 - [x] Models page (HF search, local models, register GGUF, connect external)
 - [x] Running Models page (dashboard, memory bar, live slot/KV activity)
 - [x] Chat Test page (system prompt, streaming, tool calling, inline load)
 - [x] Logs page (backend stdout/stderr viewer)
-- [x] Settings page (loading defaults, backend versions/updates, hardware info, OpenClaw config)
+- [x] Settings page (loading defaults, models dir, backend versions/updates, hardware info, OpenClaw config)
 - [x] Telemetry page (request log table)
 - [x] Load dialog (context window, parallel slots, flash attention, KV cache, GPU layers)
 
@@ -72,6 +73,7 @@ Prioritized implementation checklist.
 - [x] Tool calling works through the Flow proxy
 - [x] Streaming SSE works through the Flow proxy
 - [x] OpenClaw config shown in Settings page
+- [x] Anthropic Messages API bridge verified
 
 ---
 
@@ -83,17 +85,60 @@ Prioritized implementation checklist.
 - [ ] Dual hardware validation (Mini + Max)
 - [ ] Reasoning mode test (Gemma 4 `<|think|>` tags)
 
-### Phase 6: Polish & Hardening
+### Phase 6: Anthropic API Completeness
+- [ ] `/v1/messages/count_tokens` endpoint
+- [ ] Multimodal content blocks (image, document)
+- [ ] Extended thinking / `<thinking>` blocks passthrough
+- [ ] Redacted thinking block support
+- [ ] Server-tool use blocks
+- [ ] Citations in content blocks
+- [ ] Prompt caching (`cache_control` breakpoints)
+- [ ] Anthropic-style auth enforcement (`x-api-key` validation)
+- [ ] Anthropic version header validation (`anthropic-version`)
+- [ ] Batch API (`/v1/messages/batches`)
+
+### Phase 7: Process Manager Robustness
+- [ ] Backend crash detection (periodic `is_running()` poll or `/health` probe)
+- [ ] Auto-restart with exponential backoff on crash
+- [ ] OOM detection (stderr pattern matching, `psutil` memory pressure)
+- [ ] Model status → "error" on crash (currently stays "running" until server restart)
+- [ ] Frontend notification on backend crash
+- [ ] Graceful unload suggestion on OOM
+- [ ] Health-check task for loaded backends (periodic GET to backend `/health`)
+
+### Phase 8: Polish & Hardening
 - [ ] macOS launchd auto-start plist
-- [ ] Graceful shutdown with runtime state persistence
-- [ ] Backend crash detection + auto-restart with backoff
-- [ ] Clear error messages in frontend for all failure modes
-- [ ] OOM detection + model unload suggestion
+- [ ] Graceful shutdown with runtime state persistence (which models were loaded, params)
 - [ ] Disk space management (show usage, warn at 80%)
 - [ ] Telemetry charts (TTFT over time, throughput comparison, model comparison)
 - [ ] Config export/import (share between machines)
-- [ ] Frontend use of WebSocket real-time updates (replace polling for model/download status)
+- [ ] Replace polling with WebSocket for model/download status updates
 - [ ] Full UX design review (visual hierarchy, type scale, interaction patterns)
+
+### Phase 9: Frontend UX
+- [ ] React error boundaries on all pages
+- [ ] Loading/error states on all API calls (some are missing)
+- [ ] Toast notifications for actions (load, unload, download complete)
+- [ ] Keyboard shortcuts
+- [ ] Responsive layout / mobile
+- [ ] Accessibility audit (ARIA, focus management, contrast)
+
+### Phase 10: Security
+- [ ] CORS restriction (currently `allow_origins=["*"]`)
+- [ ] API key or token auth on management endpoints
+- [ ] Anthropic API key passthrough / validation
+- [ ] Input sanitization on model IDs and file paths
+- [ ] Rate limiting on proxy endpoints
+- [ ] Path traversal protection on file operations
+
+### Phase 11: Testing
+- [ ] Backend error mapping tests (4xx/5xx from upstream)
+- [ ] Streaming error / mid-stream failure tests
+- [ ] Download flow integration tests
+- [ ] Process manager start/stop/crash tests
+- [ ] Frontend component tests
+- [ ] End-to-end fidelity tests (Flow output vs direct llama.cpp output)
+- [ ] Long context benchmark (1K, 4K, 16K, 100K)
 
 ### Bugs Fixed
 - [x] Route ordering: `/api/models/running` before `/{model_id}` (404 fix)
@@ -105,6 +150,15 @@ Prioritized implementation checklist.
 - [x] Process manager logger not visible (added `print()` statements)
 - [x] 422 on model load (removed redundant `model_id` from `ModelLoadRequest`)
 - [x] HuggingFace search had no model card, file sizes, or download destination
+
+### Known Issues
+- [ ] `settings.ensure_dirs()` called twice in lifespan (harmless but redundant)
+- [ ] Duplicate `import json` was in chat_completions proxy (moved to top-level)
+- [ ] WebSocket `/ws` endpoint exists but frontend doesn't use it (still polling)
+- [ ] MLX port range not auto-detected at startup (only GGUF ports scanned)
+- [ ] `HuggingFaceClient(token=None)` — no way to configure HF API token
+- [ ] No `models_dir` validation (accepts any path, even non-existent)
+- [ ] Non-streaming Anthropic error response uses `_safe_parse_json_text` but streaming uses `_read_backend_error` — inconsistent pattern
 
 ### Design
 - [x] Rebrand from the legacy name to Flow LLM
@@ -122,4 +176,5 @@ Prioritized implementation checklist.
 - [ ] vLLM support (Linux/NVIDIA)
 - [ ] Distributed inference
 - [ ] Model fine-tuning
-- [ ] Broaden Anthropic compatibility beyond the MVP (`/v1/messages/count_tokens`, multimodal blocks, thinking, stricter auth)
+- [ ] HuggingFace API token configuration
+- [ ] MLX port range auto-detect on startup
