@@ -1,6 +1,6 @@
 [project]
 name = "flow-llm"
-version = "0.1.0"
+version = "1.0.0"
 description = "Flow LLM — macOS LLM orchestration for OpenClaw, Claude Code, and Codex (via AIRun) on Apple Silicon"
 requires-python = ">=3.11"
 dependencies = [
