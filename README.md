@@ -1,6 +1,6 @@
 # Flow LLM — macOS LLM Orchestration
 
-An alternative to Ollama and LM Studio for running local models with AI coding agents. Flow is a local LLM gateway for Apple Silicon that manages GGUF and MLX models, proxies OpenAI- and Anthropic-compatible API requests, and exposes real-time telemetry — so tools like OpenClaw, [Hermes](https://github.com/andisearch/airun), Claude Code, and Codex (via [AIRun](https://github.com/andisearch/airun)) can talk to local models without Ollama or LM Studio.
+An alternative to Ollama and LM Studio for running local models with AI coding agents. Flow is a local LLM gateway for Apple Silicon that manages GGUF and MLX models, proxies OpenAI- and Anthropic-compatible API requests, and exposes real-time telemetry — so tools like OpenClaw, [Hermes](https://github.com/nousresearch/hermes-agent), Claude Code, and Codex (via [AIRun](https://github.com/andisearch/airun)) can talk to local models without Ollama or LM Studio.
 
 ![Flow LLM](screenshots/flow-llm-monitor-page.png)
 
@@ -65,7 +65,7 @@ Then load it in the UI with your preferred settings (100K context, flash attenti
 
 ### 3. Configure your coding tool
 
-Point OpenClaw, [Hermes](https://github.com/andisearch/airun), Claude Code, or Codex (via [AIRun](https://github.com/andisearch/airun)) to Flow:
+Point OpenClaw, [Hermes](https://github.com/nousresearch/hermes-agent), Claude Code, or Codex (via [AIRun](https://github.com/andisearch/airun)) to Flow:
 
 ```json
 {
