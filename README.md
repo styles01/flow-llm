@@ -1,6 +1,6 @@
 # Flow LLM — macOS LLM Orchestration
 
-An alternative to Ollama and LM Studio for running local models with AI coding agents. Flow is a local LLM gateway for Apple Silicon that manages GGUF and MLX models, proxies OpenAI- and Anthropic-compatible API requests, and exposes real-time telemetry — so tools like OpenClaw, Hermes, Claude Code, and Codex (via AIRun) can talk to local models without Ollama or LM Studio.
+An alternative to Ollama and LM Studio for running local models with AI coding agents. Flow is a local LLM gateway for Apple Silicon that manages GGUF and MLX models, proxies OpenAI- and Anthropic-compatible API requests, and exposes real-time telemetry — so tools like OpenClaw, [Hermes](https://github.com/andisearch/airun), Claude Code, and Codex (via [AIRun](https://github.com/andisearch/airun)) can talk to local models without Ollama or LM Studio.
 
 ![Flow LLM](screenshots/flow-llm-monitor-page.png)
 
@@ -47,7 +47,7 @@ Open **http://localhost:3377** — everything (API + UI) is served from a single
 
 ### 2. Connect a model
 
-If you already have a llama-server running (e.g. from `gemma4.sh`):
+If you already have a llama-server running:
 
 1. Open Flow UI → **Models** → **Connect Running Model**
 2. Enter the URL (e.g. `http://127.0.0.1:8081`)
@@ -65,7 +65,7 @@ Then load it in the UI with your preferred settings (100K context, flash attenti
 
 ### 3. Configure your coding tool
 
-Point OpenClaw, Claude Code, or Codex (via AIRun) to Flow:
+Point OpenClaw, [Hermes](https://github.com/andisearch/airun), Claude Code, or Codex (via [AIRun](https://github.com/andisearch/airun)) to Flow:
 
 ```json
 {
@@ -148,7 +148,7 @@ See [docs/architecture.md](docs/architecture.md) for the full design.
 | `server/flow_llm/updater.py` | Backend version detection and update helpers for llama.cpp and mlx-openai-server |
 | `web/src/pages/Models.tsx` | Model management with HF search, local registration, connect external |
 | `web/src/pages/Chat.tsx` | Chat test with system prompt editor, streaming SSE, tool calling |
-| `web/src/pages/Running.tsx` | Running models dashboard with memory bar and live slot/KV activity |
+| `web/src/pages/Monitor.tsx` | Real-time model monitoring with request tracking |
 | `web/src/pages/Logs.tsx` | Backend log viewer with per-model filtering |
 | `web/src/pages/Settings.tsx` | Persisted load defaults, backend versions, update controls, hardware info |
 | `web/src/pages/Telemetry.tsx` | Request log table |
@@ -159,9 +159,7 @@ See [docs/architecture.md](docs/architecture.md) for the full design.
 
 | File | Purpose |
 |------|---------|
-| `gemma4.sh` | Launch script for Gemma 4 on llama-server |
 | `start.sh` | Start backend + frontend |
-| `.vscode/launch.json` | VS Code debug configuration |
 
 ## License
 
