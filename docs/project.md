@@ -78,7 +78,7 @@
 
 ---
 
-## Phase 4: Telemetry (Partial) ✅
+## Phase 4: Telemetry ✅
 
 **Goal:** Performance visibility — TTFT, throughput, token counting.
 
@@ -89,139 +89,51 @@
 | Throughput calc | ✅ Done — tokens/sec from timing data |
 | Telemetry storage | ✅ Done — SQLite table for request logs |
 | Telemetry API | ✅ Done — `GET /api/telemetry` with model filtering |
-| Telemetry frontend | ✅ Done — request log table (charts not yet built) |
+| Telemetry frontend | ✅ Done — request log table |
 
 ---
 
-## Phase 5: OpenClaw Integration & Validation (In Progress)
+## Phase 5: GitHub Readiness (In Progress)
 
-**Goal:** Prove the system works end-to-end with OpenClaw.
+**Goal:** Clean, installable, public-ready repo.
 
 | Task | Status |
 |------|--------|
-| OpenClaw config generator | ✅ Shown in Settings page |
-| System prompt validation | ✅ Verified — Gemma 4 system prompts work through Flow |
-| Tool calling validation | ✅ Verified — Gemma 4 tool calling works through Flow |
-| Streaming test | ✅ Verified — SSE tokens arrive incrementally through proxy |
-| Claude Code / AI-run bridge | ✅ Verified — Anthropic `POST /v1/messages` translates into the existing OpenAI proxy path |
-| Fidelity test | ⬜ Not yet automated |
-| Long context test | ⬜ Not yet tested at 100K |
-| Dual hardware validation | ⬜ Not yet tested on Mini |
-| Reasoning mode test | ⬜ Not yet tested — Gemma 4 `<\|think\|>` tags |
+| Expand `.gitignore` + `git rm --cached` tracked artifacts | ⬜ Not started |
+| Remove hardcoded personal paths from tests | ⬜ Not started — `/Volumes/James4TBSSD/` and `/Users/jameyaita` in test files |
+| Write `setup.sh` bootstrap script | ⬜ Not started |
+| Add `flow` CLI entry point to `pyproject.toml` | ⬜ Not started |
+| Polish README (generic paths, screenshot, one-liner install) | ⬜ Not started |
+| Add LICENSE (MIT) | ⬜ Not started |
+| Verify `pip install -e . && flow` works end-to-end | ⬜ Not started |
+| Verify `npm run build` produces working frontend | ⬜ Not started |
+| Verify frontend loads at `http://localhost:3377` | ⬜ Not started |
+| No secrets/API keys/personal data in git history | ⬜ Not verified |
+| Clean branch (`git status` shows nothing unexpected) | ⬜ Not verified |
 
 ---
 
-## Phase 6: Anthropic API Completeness (Not Started)
+## V2 Roadmap
 
-**Goal:** Full Anthropic Messages API compatibility for Claude Code / AI-run.
+Everything below is post-launch. See `docs/todo.md` for the full checklist.
 
-| Task | Status |
-|------|--------|
-| `/v1/messages/count_tokens` endpoint | ⬜ Not started |
-| Multimodal content blocks (image, document) | ⬜ Not started — adapter rejects with `invalid_request_error` |
-| Extended thinking / `<thinking>` blocks | ⬜ Not started — adapter rejects with `invalid_request_error` |
-| Redacted thinking blocks | ⬜ Not started — adapter rejects with `invalid_request_error` |
-| Server-tool use blocks | ⬜ Not started — adapter rejects with `invalid_request_error` |
-| Citations in content blocks | ⬜ Not started — adapter rejects with `invalid_request_error` |
-| Prompt caching (`cache_control` breakpoints) | ⬜ Not started |
-| Anthropic-style auth enforcement (`x-api-key`) | ⬜ Not started — headers accepted but not validated |
-| Anthropic version header validation | ⬜ Not started |
-| Batch API (`/v1/messages/batches`) | ⬜ Not started |
-| Token counting from tokenizer (not just response usage) | ⬜ Not started |
+### V2: Anthropic API Completeness
+- `/v1/messages/count_tokens`, multimodal blocks, extended thinking, prompt caching, auth enforcement, batch API
 
----
+### V2: Process Manager Robustness
+- Crash detection, auto-restart with backoff, OOM detection, health-check loop
 
-## Phase 7: Process Manager Robustness (Not Started)
+### V2: Polish & Hardening
+- launchd auto-start, graceful shutdown with state persistence, disk space management, telemetry charts, config export/import, WebSocket real-time updates
 
-**Goal:** Crash detection, auto-recovery, health monitoring.
+### V2: Frontend UX
+- Error boundaries, toast notifications, keyboard shortcuts, responsive layout, accessibility
 
-| Task | Status |
-|------|--------|
-| Backend crash detection (poll `is_running`) | ⬜ Not started — no health-check loop exists |
-| Auto-restart with exponential backoff | ⬜ Not started |
-| OOM detection (stderr pattern matching, memory pressure) | ⬜ Not started |
-| Health-check endpoint on loaded backends | ⬜ Not started — no periodic `/health` probe |
-| Model status → "error" on crash (currently stays "running") | ⬜ Not started — stale state only reset on server restart |
-| Frontend notification on backend crash | ⬜ Not started |
-| Graceful unload suggestion on OOM | ⬜ Not started |
+### V2: Security
+- CORS restriction, API auth, rate limiting, path traversal protection
 
----
+### V2: Testing
+- Backend error mapping, streaming failures, download integration, process manager, E2E fidelity, long context benchmarks
 
-## Phase 8: Polish & Hardening (In Progress)
-
-**Goal:** Production-ready for daily use.
-
-| Task | Status |
-|------|--------|
-| Auto-start on login (macOS launchd) | ⬜ Not started |
-| Graceful shutdown with runtime state persistence | ⬜ Partial — backend stops cleanly, settings persist, runtime state does not |
-| Backend version management | ✅ Done — startup checks, persisted auto-update toggle, manual update actions |
-| Error recovery (backend crash detection) | ⬜ Not started (see Phase 7) |
-| Disk space management | ⬜ Not started — no usage display or warning |
-| Config export/import | ⬜ Not started |
-| Telemetry charts | ⬜ Not started — table only, no graphs |
-| WebSocket for real-time model/download status | ⬜ Skeleton exists — endpoint at `/ws`, frontend still polls |
-
----
-
-## Phase 9: Frontend UX (Not Started)
-
-**Goal:** Polish the UI beyond functional.
-
-| Task | Status |
-|------|--------|
-| Error boundaries for React pages | ⬜ Not started — unhandled errors crash the page |
-| Loading/error states on all API calls | ⬜ Partial — some calls lack loading indicators |
-| Toast notifications for actions (load, unload, download) | ⬜ Not started — rely on refetch |
-| Keyboard shortcuts | ⬜ Not started |
-| Responsive layout | ⬜ Not started — fixed sidebar, no mobile layout |
-| Full design review (visual hierarchy, type scale) | ⬜ Not started |
-| Accessibility audit | ⬜ Not started |
-
----
-
-## Phase 10: Security (Not Started)
-
-**Goal:** Safe for network exposure.
-
-| Task | Status |
-|------|--------|
-| CORS restriction (currently `allow_origins=["*"]`) | ⬜ Not started — wide open |
-| API key or token auth on management endpoints | ⬜ Not started |
-| Anthropic API key passthrough / validation | ⬜ Not started — headers accepted but ignored |
-| Input sanitization on model IDs, file paths | ⬜ Partial — some endpoints accept arbitrary strings |
-| Rate limiting | ⬜ Not started |
-| Path traversal protection on file operations | ⬜ Not started |
-
----
-
-## Phase 11: Testing (Partial)
-
-**Goal:** Automated test coverage.
-
-| Task | Status |
-|------|--------|
-| Anthropic adapter unit tests | ✅ Done — invalid model probe, non-streaming translation, streaming event order, tool round-trip, unsupported blocks, auth header acceptance |
-| Model registry & settings tests | ✅ Done — settings persistence, legacy migration, local scan |
-| OpenAI proxy tests | ✅ Done — passthrough unchanged |
-| Backend error mapping tests | ⬜ Not started — 4xx/5xx from upstream not tested |
-| Streaming error/timeout tests | ⬜ Not started — mid-stream failures not tested |
-| Download flow integration tests | ⬜ Not started |
-| Process manager start/stop tests | ⬜ Not started |
-| Frontend component tests | ⬜ Not started |
-| End-to-end fidelity tests (Flow vs direct llama.cpp) | ⬜ Not started |
-| Long context benchmark (1K, 4K, 16K, 100K) | ⬜ Not started |
-
----
-
-## Future
-
-| Task | Notes |
-|------|-------|
-| Multi-machine network routing | Route to remote Macs/Linux boxes |
-| Automatic GGUF → MLX conversion | Convert on download or on load |
-| vLLM support (Linux/NVIDIA) | Backend-agnostic process manager already supports this |
-| Distributed inference | Split model across machines |
-| Model fine-tuning | MLX fine-tune integration |
-| HuggingFace API token support | Currently `HuggingFaceClient(token=None)` |
-| MLX port range auto-detect | Only GGUF ports scanned at startup |
+### V2: Future
+- Multi-machine routing, GGUF→MLX conversion, vLLM support, distributed inference, fine-tuning, HF API token config

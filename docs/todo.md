@@ -4,7 +4,35 @@ Prioritized implementation checklist.
 
 ---
 
-## Completed ✅
+## V1: Phase 5 — GitHub Readiness
+
+### Git cleanup
+- [ ] Expand `.gitignore` (add `*.db`, `.vscode/`, `server/*.egg-info/`, etc.)
+- [ ] `git rm --cached` tracked artifacts (`__pycache__/`, `.egg-info/`, `.flow.pid`, `server/logs/`)
+- [ ] Verify no secrets/API keys/personal data in git history
+
+### Remove personal paths
+- [ ] Replace `/Volumes/James4TBSSD/llms/...` in `server/tests/test_model_registry_and_settings.py` with generic tmp_path values
+- [ ] Replace `/Users/jameyaita` in `server/tests/test_anthropic_messages.py` with generic paths
+
+### Bootstrap & packaging
+- [ ] Write `setup.sh` (check Python 3.11+, Node 18+, llama-server, mlx-openai-server; pip install -e .; npm install && npm run build)
+- [ ] Add `flow` CLI entry point to `pyproject.toml` (`flow = "flow_llm.main:main"`)
+- [ ] Verify `pip install -e . && flow` starts the server
+- [ ] Verify `npm run build` produces working `web/dist/`
+- [ ] Verify frontend loads at `http://localhost:3377`
+
+### Documentation
+- [ ] Polish README (generic paths, remove personal SSD references, add screenshot/GIF, add one-liner install, add "What it does" section)
+- [ ] Add LICENSE (MIT)
+
+### Final checks
+- [ ] Clean branch — `git status` shows nothing unexpected
+- [ ] End-to-end smoke test on a clean clone
+
+---
+
+## V1: Completed ✅
 
 ### Phase 0: Foundation
 - [x] Create monorepo structure (`server/`, `web/`)
@@ -68,77 +96,15 @@ Prioritized implementation checklist.
 - [x] Processing progress endpoint
 - [x] Live model activity endpoint
 
-### Phase 5: OpenClaw Validation
-- [x] System prompts work through the Flow proxy
-- [x] Tool calling works through the Flow proxy
-- [x] Streaming SSE works through the Flow proxy
-- [x] OpenClaw config shown in Settings page
-- [x] Anthropic Messages API bridge verified
-
----
-
-## Remaining ⬜
-
-### Phase 5: OpenClaw Validation (continued)
-- [ ] Automated fidelity test suite (Flow output == direct llama.cpp output)
-- [ ] Long context benchmark (1K, 4K, 16K, 100K)
-- [ ] Dual hardware validation (Mini + Max)
-- [ ] Reasoning mode test (Gemma 4 `<|think|>` tags)
-
-### Phase 6: Anthropic API Completeness
-- [ ] `/v1/messages/count_tokens` endpoint
-- [ ] Multimodal content blocks (image, document)
-- [ ] Extended thinking / `<thinking>` blocks passthrough
-- [ ] Redacted thinking block support
-- [ ] Server-tool use blocks
-- [ ] Citations in content blocks
-- [ ] Prompt caching (`cache_control` breakpoints)
-- [ ] Anthropic-style auth enforcement (`x-api-key` validation)
-- [ ] Anthropic version header validation (`anthropic-version`)
-- [ ] Batch API (`/v1/messages/batches`)
-
-### Phase 7: Process Manager Robustness
-- [ ] Backend crash detection (periodic `is_running()` poll or `/health` probe)
-- [ ] Auto-restart with exponential backoff on crash
-- [ ] OOM detection (stderr pattern matching, `psutil` memory pressure)
-- [ ] Model status → "error" on crash (currently stays "running" until server restart)
-- [ ] Frontend notification on backend crash
-- [ ] Graceful unload suggestion on OOM
-- [ ] Health-check task for loaded backends (periodic GET to backend `/health`)
-
-### Phase 8: Polish & Hardening
-- [ ] macOS launchd auto-start plist
-- [ ] Graceful shutdown with runtime state persistence (which models were loaded, params)
-- [ ] Disk space management (show usage, warn at 80%)
-- [ ] Telemetry charts (TTFT over time, throughput comparison, model comparison)
-- [ ] Config export/import (share between machines)
-- [ ] Replace polling with WebSocket for model/download status updates
-- [ ] Full UX design review (visual hierarchy, type scale, interaction patterns)
-
-### Phase 9: Frontend UX
-- [ ] React error boundaries on all pages
-- [ ] Loading/error states on all API calls (some are missing)
-- [ ] Toast notifications for actions (load, unload, download complete)
-- [ ] Keyboard shortcuts
-- [ ] Responsive layout / mobile
-- [ ] Accessibility audit (ARIA, focus management, contrast)
-
-### Phase 10: Security
-- [ ] CORS restriction (currently `allow_origins=["*"]`)
-- [ ] API key or token auth on management endpoints
-- [ ] Anthropic API key passthrough / validation
-- [ ] Input sanitization on model IDs and file paths
-- [ ] Rate limiting on proxy endpoints
-- [ ] Path traversal protection on file operations
-
-### Phase 11: Testing
-- [ ] Backend error mapping tests (4xx/5xx from upstream)
-- [ ] Streaming error / mid-stream failure tests
-- [ ] Download flow integration tests
-- [ ] Process manager start/stop/crash tests
-- [ ] Frontend component tests
-- [ ] End-to-end fidelity tests (Flow output vs direct llama.cpp output)
-- [ ] Long context benchmark (1K, 4K, 16K, 100K)
+### Design
+- [x] Rebrand from the legacy name to Flow LLM
+- [x] Teal + magenta synthwave color scheme
+- [x] Bitcrushed waveform favicon and sidebar logo
+- [x] Model search results show instruct/vision/mlx badges
+- [x] Model detail card with description, tags, file breakdown, download destination
+- [x] GGUF and MLX tabs in model detail view
+- [x] "View on HuggingFace" link on model cards
+- [x] File path shown under local model entries
 
 ### Bugs Fixed
 - [x] Route ordering: `/api/models/running` before `/{model_id}` (404 fix)
@@ -151,24 +117,78 @@ Prioritized implementation checklist.
 - [x] 422 on model load (removed redundant `model_id` from `ModelLoadRequest`)
 - [x] HuggingFace search had no model card, file sizes, or download destination
 
+---
+
+## V2 Roadmap
+
+### Anthropic API Completeness
+- [ ] `/v1/messages/count_tokens` endpoint
+- [ ] Multimodal content blocks (image, document)
+- [ ] Extended thinking / `<thinking>` blocks passthrough
+- [ ] Redacted thinking block support
+- [ ] Server-tool use blocks
+- [ ] Citations in content blocks
+- [ ] Prompt caching (`cache_control` breakpoints)
+- [ ] Anthropic-style auth enforcement (`x-api-key` validation)
+- [ ] Anthropic version header validation (`anthropic-version`)
+- [ ] Batch API (`/v1/messages/batches`)
+
+### Process Manager Robustness
+- [ ] Backend crash detection (periodic `is_running()` poll or `/health` probe)
+- [ ] Auto-restart with exponential backoff on crash
+- [ ] OOM detection (stderr pattern matching, `psutil` memory pressure)
+- [ ] Model status → "error" on crash (currently stays "running" until server restart)
+- [ ] Frontend notification on backend crash
+- [ ] Graceful unload suggestion on OOM
+- [ ] Health-check task for loaded backends (periodic GET to backend `/health`)
+
+### OpenClaw Validation
+- [ ] Automated fidelity test suite (Flow output == direct llama.cpp output)
+- [ ] Long context benchmark (1K, 4K, 16K, 100K)
+- [ ] Dual hardware validation (Mini + Max)
+- [ ] Reasoning mode test (Gemma 4 `<|think|>` tags)
+
+### Polish & Hardening
+- [ ] macOS launchd auto-start plist
+- [ ] Graceful shutdown with runtime state persistence (which models were loaded, params)
+- [ ] Disk space management (show usage, warn at 80%)
+- [ ] Telemetry charts (TTFT over time, throughput comparison, model comparison)
+- [ ] Config export/import (share between machines)
+- [ ] Replace polling with WebSocket for model/download status updates
+- [ ] Full UX design review (visual hierarchy, type scale, interaction patterns)
+
+### Frontend UX
+- [ ] React error boundaries on all pages
+- [ ] Loading/error states on all API calls (some are missing)
+- [ ] Toast notifications for actions (load, unload, download complete)
+- [ ] Keyboard shortcuts
+- [ ] Responsive layout / mobile
+- [ ] Accessibility audit (ARIA, focus management, contrast)
+
+### Security
+- [ ] CORS restriction (currently `allow_origins=["*"]`)
+- [ ] API key or token auth on management endpoints
+- [ ] Anthropic API key passthrough / validation
+- [ ] Input sanitization on model IDs and file paths
+- [ ] Rate limiting on proxy endpoints
+- [ ] Path traversal protection on file operations
+
+### Testing
+- [ ] Backend error mapping tests (4xx/5xx from upstream)
+- [ ] Streaming error / mid-stream failure tests
+- [ ] Download flow integration tests
+- [ ] Process manager start/stop/crash tests
+- [ ] Frontend component tests
+- [ ] End-to-end fidelity tests (Flow output vs direct llama.cpp output)
+- [ ] Long context benchmark (1K, 4K, 16K, 100K)
+
 ### Known Issues
 - [ ] `settings.ensure_dirs()` called twice in lifespan (harmless but redundant)
-- [ ] Duplicate `import json` was in chat_completions proxy (moved to top-level)
 - [ ] WebSocket `/ws` endpoint exists but frontend doesn't use it (still polling)
 - [ ] MLX port range not auto-detected at startup (only GGUF ports scanned)
 - [ ] `HuggingFaceClient(token=None)` — no way to configure HF API token
 - [ ] No `models_dir` validation (accepts any path, even non-existent)
-- [ ] Non-streaming Anthropic error response uses `_safe_parse_json_text` but streaming uses `_read_backend_error` — inconsistent pattern
-
-### Design
-- [x] Rebrand from the legacy name to Flow LLM
-- [x] Teal + magenta synthwave color scheme
-- [x] Bitcrushed waveform favicon and sidebar logo
-- [x] Model search results show instruct/vision/mlx badges
-- [x] Model detail card with description, tags, file breakdown, download destination
-- [x] GGUF and MLX tabs in model detail view
-- [x] "View on HuggingFace" link on model cards
-- [x] File path shown under local model entries
+- [ ] Non-streaming and streaming error parsing use inconsistent patterns
 
 ### Future
 - [ ] Multi-machine network routing
