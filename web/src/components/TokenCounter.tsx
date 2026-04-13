@@ -1,35 +1,33 @@
 /**
- * TokenCounter — LM Studio-style token counter with rolling digit animation.
- * Updates at a visual cadence (~10Hz) rather than every WS push, so the digits
- * are readable. Each digit rolls into place with a vertical translate transition.
+ * TokenCounter — odometer-style token counter.
+ *
+ * 4 fixed digit slots, right-aligned. Digits roll vertically when they
+ * change. Commas are purely visual separators between groups. Starts at
+ * 0000 and each slot rolls independently as its value changes.
  */
 
 import { useRef, useEffect, useState } from 'react'
 
-interface DigitRollerProps {
+interface DigitSlotProps {
   digit: number
 }
 
-function DigitRoller({ digit }: DigitRollerProps) {
+function DigitSlot({ digit }: DigitSlotProps) {
+  // Leading zeros show blank so 42 displays as "  ,42" not "0,042"
   return (
     <div className="h-7 w-4 overflow-hidden relative">
       <div
-        className="transition-transform duration-[200ms] ease-out"
+        className="transition-transform duration-[300ms] ease-out"
         style={{ transform: `translateY(-${digit * 100}%)` }}
       >
         {Array.from({ length: 10 }, (_, i) => (
           <div key={i} className="h-7 w-4 flex items-center justify-center font-mono text-2xl text-teal-400">
-            {i}
+            {i === 0 ? '' : i}
           </div>
         ))}
       </div>
     </div>
   )
-}
-
-/** Format a token count to a readable string with commas: 1423 → "1,423" */
-function formatCount(n: number): string {
-  return n.toLocaleString()
 }
 
 interface TokenCounterProps {
@@ -38,19 +36,17 @@ interface TokenCounterProps {
 }
 
 export function TokenCounter({ count, rate }: TokenCounterProps) {
-  // Render at ~10Hz for readability — not on every WS push
+  // Update display at ~4Hz
   const [displayCount, setDisplayCount] = useState(count)
   const lastUpdateRef = useRef(0)
 
   useEffect(() => {
     const now = performance.now()
-    // Update visual at most every 100ms
-    if (now - lastUpdateRef.current >= 100) {
+    if (now - lastUpdateRef.current >= 250) {
       setDisplayCount(count)
       lastUpdateRef.current = now
     } else {
-      // Schedule the update for when the 100ms window passes
-      const delay = 100 - (now - lastUpdateRef.current)
+      const delay = 250 - (now - lastUpdateRef.current)
       const timer = setTimeout(() => {
         setDisplayCount(count)
         lastUpdateRef.current = performance.now()
@@ -59,7 +55,12 @@ export function TokenCounter({ count, rate }: TokenCounterProps) {
     }
   }, [count])
 
-  const digits = formatCount(displayCount).split('')
+  // Extract 4 digits, right-aligned: 1423 → [1, 4, 2, 3], 42 → [0, 0, 4, 2]
+  const d0 = Math.floor((displayCount % 10000) / 1000)
+  const d1 = Math.floor((displayCount % 1000) / 100)
+  const d2 = Math.floor((displayCount % 100) / 10)
+  const d3 = displayCount % 10
+
   const isFast = rate != null && rate > 30
 
   return (
@@ -68,11 +69,11 @@ export function TokenCounter({ count, rate }: TokenCounterProps) {
         className={`flex items-center ${isFast ? 'osc-glow-active' : ''}`}
         style={isFast ? { textShadow: '0 0 8px rgba(45, 212, 191, 0.5)' } : undefined}
       >
-        {digits.map((d, i) => (
-          d === ','
-            ? <span key={i} className="font-mono text-2xl text-teal-400/60 w-2">,</span>
-            : <DigitRoller key={i} digit={parseInt(d)} />
-        ))}
+        <DigitSlot digit={d0} />
+        <span className="font-mono text-2xl text-teal-400/60 w-1.5 text-center">,</span>
+        <DigitSlot digit={d1} />
+        <DigitSlot digit={d2} />
+        <DigitSlot digit={d3} />
       </div>
       {rate != null && (
         <span className="text-xs text-teal-500/60 ml-2 font-mono">

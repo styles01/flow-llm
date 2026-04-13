@@ -30,5 +30,8 @@ flow = "flow_llm.main:main"
 requires = ["setuptools>=75.0"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+include = ["flow_llm*"]
+
 [tool.setuptools.package-data]
 flow_llm = ["frontend/**"]
