@@ -35,6 +35,13 @@ Prioritized implementation checklist.
 - [x] Load/unload endpoints with configurable parameters
 - [x] Proxy router with streaming SSE passthrough
 - [x] `/v1/models` OpenAI-compatible endpoint
+- [x] Anthropic `POST /v1/messages` MVP adapter for AI-run / Claude Code
+- [x] Anthropic request translation (`system`, `messages`, `tools`, `tool_choice`)
+- [x] Anthropic response mapping (text + `tool_use`, usage, stop reasons)
+- [x] Anthropic streaming SSE mapping (`message_start` → `message_stop`)
+- [x] Anthropic `tool_use` / `tool_result` round-trip support
+- [x] Anthropic-compatible error mapping for invalid models and backend failures
+- [x] AI-run compatibility tests for invalid-model probe, streaming, tools, and auth header acceptance
 - [x] Stale state cleanup on restart
 - [x] Settings API (GET/PUT `/api/settings`)
 - [x] Persist settings to disk (`settings.json`)
@@ -115,4 +122,4 @@ Prioritized implementation checklist.
 - [ ] vLLM support (Linux/NVIDIA)
 - [ ] Distributed inference
 - [ ] Model fine-tuning
-- [ ] Anthropic Messages API compatibility
+- [ ] Broaden Anthropic compatibility beyond the MVP (`/v1/messages/count_tokens`, multimodal blocks, thinking, stricter auth)

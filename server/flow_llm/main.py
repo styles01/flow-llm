@@ -1,21 +1,30 @@
 """Flow LLM FastAPI application with management API and OpenAI-compatible proxy."""
 
 import asyncio
+import json
 import logging
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from flow_llm.config import settings
-from flow_llm.database import Model, Telemetry, init_db
+from flow_llm.anthropic_adapter import (
+    AnthropicRequestError,
+    AnthropicStreamTranslator,
+    error_body,
+    make_request_id,
+    to_anthropic_response,
+    to_openai_chat_request,
+)
+from flow_llm.config import LEGACY_DB_PATH, settings
+from flow_llm.database import Model, Telemetry, init_db, migrate_legacy_registry
 from flow_llm.hardware import get_hardware_info, estimate_model_memory
 from flow_llm.hf_client import HuggingFaceClient
 from flow_llm.process_manager import process_manager, BackendProcess
@@ -175,8 +184,13 @@ async def lifespan(app: FastAPI):
     # Startup
     settings.ensure_dirs()
     settings.load_from_disk()
+    settings.ensure_dirs()
     db_session_factory = init_db(settings.db_path)
     hf_client = HuggingFaceClient(token=None)  # TODO: load from config
+
+    migrated = migrate_legacy_registry(db_session_factory, LEGACY_DB_PATH)
+    if migrated:
+        logger.info("Migrated %s model registry entries from %s", migrated, LEGACY_DB_PATH)
 
     # Reset any stale "running" or "error" statuses from previous sessions
     session = db_session_factory()
@@ -548,6 +562,48 @@ async def scan_local_models():
                 "path": str(gguf_path),
             })
 
+        # Detect MLX repos by their directory contents.
+        for candidate in models_dir.iterdir():
+            if not candidate.is_dir() or candidate.name.startswith("."):
+                continue
+            if not _looks_like_mlx_model_dir(candidate):
+                continue
+
+            existing = session.query(Model).filter(Model.mlx_path == str(candidate)).first()
+            if existing:
+                continue
+
+            size_gb = round(
+                sum(path.stat().st_size for path in candidate.rglob("*") if path.is_file()) / (1024**3),
+                2,
+            )
+            validation = validate_model_dir(candidate)
+            model_id = candidate.name
+            model_name = candidate.name.split("__", 1)[-1] if "__" in candidate.name else candidate.name
+
+            model = Model(
+                id=model_id,
+                name=model_name,
+                hf_id=None,
+                backend="mlx",
+                gguf_file=None,
+                mlx_path=str(candidate),
+                quantization=None,
+                size_gb=size_gb,
+                template_valid=validation.valid,
+                template_errors="; ".join(validation.errors) if validation.errors else None,
+                supports_tools=validation.supports_tools,
+                status="available",
+            )
+            session.add(model)
+            found.append({
+                "id": model_id,
+                "name": model_name,
+                "backend": "mlx",
+                "size_gb": size_gb,
+                "path": str(candidate),
+            })
+
         session.commit()
         return {"found": found, "total": len(found)}
     except Exception as e:
@@ -916,6 +972,294 @@ async def get_telemetry(model_id: Optional[str] = None, limit: int = 100):
 # --- OpenAI-Compatible Proxy ---
 
 
+def _available_model_ids() -> list[str]:
+    """Return all currently routed model ids."""
+    return list(process_manager.get_all_processes().keys())
+
+
+def _anthropic_error_response(
+    status_code: int,
+    error_type: str,
+    message: str,
+    request_id: str,
+):
+    """Return an Anthropic-compatible JSON error."""
+    return JSONResponse(
+        status_code=status_code,
+        content=error_body(error_type, message, request_id),
+        headers={"request-id": request_id},
+    )
+
+
+def _extract_backend_error_message(payload: Any, raw_text: str) -> str | None:
+    """Pull a human-readable error message from an upstream backend response."""
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict) and isinstance(error.get("message"), str):
+            return error["message"]
+        if isinstance(error, str):
+            return error
+        detail = payload.get("detail")
+        if isinstance(detail, str):
+            return detail
+        message = payload.get("message")
+        if isinstance(message, str):
+            return message
+    if raw_text:
+        return raw_text
+    return None
+
+
+async def _read_backend_error(response: httpx.Response) -> tuple[Any, str]:
+    """Read and parse an upstream backend error payload."""
+    raw_bytes = await response.aread()
+    raw_text = raw_bytes.decode(errors="replace").strip()
+    if not raw_text:
+        return None, ""
+    try:
+        return json.loads(raw_text), raw_text
+    except json.JSONDecodeError:
+        return None, raw_text
+
+
+def _map_backend_error(
+    status_code: int,
+    payload: Any,
+    raw_text: str,
+    model_name: str,
+) -> tuple[int, str, str]:
+    """Map backend failures into Anthropic-compatible error semantics."""
+    message = _extract_backend_error_message(payload, raw_text)
+    if status_code >= 500:
+        return (
+            status_code,
+            "api_error",
+            message or f"Backend for model '{model_name}' returned HTTP {status_code}.",
+        )
+
+    return (
+        status_code if status_code >= 400 else 400,
+        "invalid_request_error",
+        message or f"Backend rejected the request for model '{model_name}' with HTTP {status_code}.",
+    )
+
+
+def _anthropic_stream_error_event(error_type: str, message: str) -> str:
+    """Build an Anthropic SSE error event."""
+    return (
+        f"event: error\n"
+        f"data: {json.dumps({'type': 'error', 'error': {'type': error_type, 'message': message}}, separators=(',', ':'))}\n\n"
+    )
+
+
+@app.post("/v1/messages")
+async def anthropic_messages(request: dict):
+    """Anthropic-compatible Messages API endpoint for Claude Code and AI-run."""
+    from flow_llm.process_manager import reset_processing_progress
+
+    request_id = make_request_id()
+
+    try:
+        openai_request = to_openai_chat_request(request)
+    except AnthropicRequestError as exc:
+        return _anthropic_error_response(exc.status_code, exc.error_type, exc.message, request_id)
+
+    model_name = openai_request.get("model", "")
+    proc = process_manager.get_process(model_name)
+    reset_processing_progress(model_name)
+
+    if not proc:
+        return _anthropic_error_response(
+            400,
+            "invalid_request_error",
+            f"Model '{model_name}' is not loaded. Available: {_available_model_ids()}",
+            request_id,
+        )
+
+    start_time = time.monotonic()
+    backend_url = proc.base_url
+
+    if openai_request.get("stream", False):
+        client = httpx.AsyncClient(timeout=300.0)
+        try:
+            backend_request = client.build_request(
+                "POST",
+                f"{backend_url}/v1/chat/completions",
+                json=openai_request,
+                headers={"Content-Type": "application/json"},
+            )
+            response = await client.send(backend_request, stream=True)
+        except httpx.HTTPError as exc:
+            await client.aclose()
+            reset_processing_progress(model_name)
+            message = f"Failed to reach backend for model '{model_name}': {exc}"
+            await _record_telemetry(
+                model_id=model_name,
+                backend=proc.backend,
+                error=message,
+            )
+            return _anthropic_error_response(502, "api_error", message, request_id)
+
+        if response.status_code >= 400:
+            payload, raw_text = await _read_backend_error(response)
+            await response.aclose()
+            await client.aclose()
+            reset_processing_progress(model_name)
+            status_code, error_type, message = _map_backend_error(
+                response.status_code,
+                payload,
+                raw_text,
+                model_name,
+            )
+            await _record_telemetry(
+                model_id=model_name,
+                backend=proc.backend,
+                error=message,
+            )
+            return _anthropic_error_response(status_code, error_type, message, request_id)
+
+        async def stream_anthropic_events():
+            translator = AnthropicStreamTranslator(model_name)
+            first_output_time = None
+            stream_error_message = None
+            try:
+                async for line in response.aiter_lines():
+                    if not line or not line.startswith("data: "):
+                        continue
+                    data = line[6:]
+                    if data == "[DONE]":
+                        break
+
+                    try:
+                        chunk = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+
+                    try:
+                        events, emitted_output = translator.process_chunk(chunk)
+                    except AnthropicRequestError as exc:
+                        stream_error_message = exc.message
+                        yield _anthropic_stream_error_event(exc.error_type, exc.message)
+                        return
+
+                    if emitted_output and first_output_time is None:
+                        first_output_time = time.monotonic()
+
+                    for event in events:
+                        yield event
+
+                for event in translator.finish_events():
+                    if event.startswith("event: error"):
+                        stream_error_message = "Anthropic stream translation failed."
+                    yield event
+            finally:
+                await response.aclose()
+                await client.aclose()
+                reset_processing_progress(model_name)
+                end_time = time.monotonic()
+                ttft_ms = (first_output_time - start_time) * 1000 if first_output_time else None
+                elapsed_sec = (end_time - start_time) if first_output_time else None
+                final_output_tokens = translator.output_tokens or (translator.output_delta_count or None)
+                tokens_per_sec = (
+                    final_output_tokens / elapsed_sec
+                    if final_output_tokens and elapsed_sec and elapsed_sec > 0
+                    else None
+                )
+                await _record_telemetry(
+                    model_id=model_name,
+                    backend=proc.backend,
+                    ttft_ms=ttft_ms,
+                    input_tokens=translator.input_tokens or None,
+                    output_tokens=final_output_tokens,
+                    tokens_per_sec=tokens_per_sec,
+                    error=stream_error_message,
+                )
+
+        return StreamingResponse(
+            stream_anthropic_events(),
+            media_type="text/event-stream",
+            headers={"request-id": request_id},
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            response = await client.post(
+                f"{backend_url}/v1/chat/completions",
+                json=openai_request,
+                headers={"Content-Type": "application/json"},
+            )
+    except httpx.HTTPError as exc:
+        reset_processing_progress(model_name)
+        message = f"Failed to reach backend for model '{model_name}': {exc}"
+        await _record_telemetry(
+            model_id=model_name,
+            backend=proc.backend,
+            error=message,
+        )
+        return _anthropic_error_response(502, "api_error", message, request_id)
+
+    if response.status_code >= 400:
+        payload, raw_text = _safe_parse_json_text(response.text)
+        status_code, error_type, message = _map_backend_error(
+            response.status_code,
+            payload,
+            raw_text,
+            model_name,
+        )
+        reset_processing_progress(model_name)
+        await _record_telemetry(
+            model_id=model_name,
+            backend=proc.backend,
+            error=message,
+        )
+        return _anthropic_error_response(status_code, error_type, message, request_id)
+
+    try:
+        result = response.json()
+        anthropic_result = to_anthropic_response(result, model_name)
+    except (ValueError, AnthropicRequestError) as exc:
+        reset_processing_progress(model_name)
+        message = exc.message if isinstance(exc, AnthropicRequestError) else f"Failed to decode backend response: {exc}"
+        await _record_telemetry(
+            model_id=model_name,
+            backend=proc.backend,
+            error=message,
+        )
+        return _anthropic_error_response(500, "api_error", message, request_id)
+
+    end_time = time.monotonic()
+    usage = result.get("usage", {})
+    input_tokens = usage.get("prompt_tokens")
+    output_tokens = usage.get("completion_tokens")
+    tokens_per_sec = output_tokens / (end_time - start_time) if output_tokens and end_time > start_time else None
+
+    reset_processing_progress(model_name)
+    await _record_telemetry(
+        model_id=model_name,
+        backend=proc.backend,
+        ttft_ms=(end_time - start_time) * 1000,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=usage.get("total_tokens"),
+        tokens_per_sec=tokens_per_sec,
+    )
+    return JSONResponse(
+        content=anthropic_result,
+        headers={"request-id": request_id},
+    )
+
+
+def _safe_parse_json_text(raw_text: str) -> tuple[Any, str]:
+    """Best-effort JSON parsing for non-streaming backend errors."""
+    raw_text = raw_text.strip()
+    if not raw_text:
+        return None, ""
+    try:
+        return json.loads(raw_text), raw_text
+    except json.JSONDecodeError:
+        return None, raw_text
+
+
 @app.post("/v1/chat/completions")
 async def chat_completions(request: dict):
     """Proxy chat completion requests to the appropriate backend.
@@ -959,7 +1303,6 @@ async def chat_completions(request: dict):
                                 yield "data: [DONE]\n\n"
                                 break
                             try:
-                                import json
                                 chunk = json.loads(data)
                                 # Count output tokens from usage if available
                                 usage = chunk.get("usage")
@@ -1083,10 +1426,21 @@ async def _record_telemetry(
         session.close()
 
 
+def _looks_like_mlx_model_dir(path: Path) -> bool:
+    """Best-effort detection for an MLX model repo on disk."""
+    if not path.is_dir():
+        return False
+    has_weights = any(path.glob("*.safetensors"))
+    has_config = (path / "config.json").exists()
+    has_tokenizer = (path / "tokenizer.json").exists() or (path / "tokenizer.model").exists()
+    return has_weights and has_config and has_tokenizer
+
+
 # --- Health ---
 
 
 class UpdateSettingsRequest(BaseModel):
+    models_dir: Optional[str] = None
     default_ctx_size: Optional[int] = None
     default_flash_attn: Optional[str] = None
     default_cache_type_k: Optional[str] = None
@@ -1114,6 +1468,11 @@ async def get_settings():
 @app.put("/api/settings")
 async def update_settings(request: UpdateSettingsRequest):
     """Update default settings for model loading."""
+    if request.models_dir is not None:
+        if not request.models_dir.strip():
+            raise HTTPException(400, "models_dir cannot be empty")
+        settings.models_dir = Path(request.models_dir).expanduser()
+        settings.models_dir.mkdir(parents=True, exist_ok=True)
     if request.default_ctx_size is not None:
         settings.default_ctx_size = request.default_ctx_size
     if request.default_flash_attn is not None:

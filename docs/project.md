@@ -52,6 +52,7 @@
 | Load/unload endpoints | ✅ Done — with configurable ctx, flash attention, KV cache, parallel slots |
 | Proxy router | ✅ Done — streaming SSE passthrough + non-streaming |
 | `/v1/models` endpoint | ✅ Done — OpenAI-compatible model listing |
+| Anthropic Messages API MVP | ✅ Done — `POST /v1/messages` adapter for AI-run / Claude Code with text, streaming SSE, and client tool support |
 | Stale state cleanup on restart | ✅ Done — resets "running" models to "available" |
 | Settings API | ✅ Done — GET/PUT `/api/settings` for default loading params |
 | Settings persistence | ✅ Done — load defaults and auto-update flag saved to `settings.json` |
@@ -101,6 +102,7 @@
 | System prompt validation | ✅ Verified — Gemma 4 system prompts work through Flow |
 | Tool calling validation | ✅ Verified — Gemma 4 tool calling works through Flow |
 | Streaming test | ✅ Verified — SSE tokens arrive incrementally through proxy |
+| Claude Code / AI-run bridge | ✅ Verified — Anthropic `POST /v1/messages` translates into the existing OpenAI proxy path |
 | Fidelity test | ⬜ Not yet automated |
 | Long context test | ⬜ Not yet tested at 100K |
 | Dual hardware validation | ⬜ Not yet tested on Mini |

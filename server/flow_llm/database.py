@@ -1,5 +1,6 @@
 """SQLAlchemy models for the Flow LLM model registry."""
 
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -77,3 +78,116 @@ def init_db(db_path: Path):
     engine = create_engine(f"sqlite:///{db_path}", echo=False)
     Base.metadata.create_all(engine)
     return sessionmaker(engine, expire_on_commit=False)
+
+
+def migrate_legacy_registry(session_factory, legacy_db_path: Path) -> int:
+    """Merge models from a legacy registry DB into the current database.
+
+    Existing models are updated only when legacy data fills in missing fields.
+    Returns the number of inserted or updated model records.
+    """
+    if not legacy_db_path.exists():
+        return 0
+
+    conn = sqlite3.connect(legacy_db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                id,
+                name,
+                hf_id,
+                backend,
+                gguf_file,
+                mlx_path,
+                quantization,
+                size_gb,
+                memory_gb,
+                chat_template,
+                template_valid,
+                template_errors,
+                supports_tools,
+                status,
+                port,
+                pid
+            FROM models
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+
+    if not rows:
+        return 0
+
+    session = session_factory()
+    changes = 0
+    try:
+        for row in rows:
+            existing = session.query(Model).filter(Model.id == row["id"]).first()
+            if existing is None:
+                session.add(
+                    Model(
+                        id=row["id"],
+                        name=row["name"],
+                        hf_id=row["hf_id"],
+                        backend=row["backend"],
+                        gguf_file=row["gguf_file"],
+                        mlx_path=row["mlx_path"],
+                        quantization=row["quantization"],
+                        size_gb=row["size_gb"],
+                        memory_gb=row["memory_gb"],
+                        chat_template=row["chat_template"],
+                        template_valid=row["template_valid"],
+                        template_errors=row["template_errors"],
+                        supports_tools=row["supports_tools"],
+                        status=row["status"] or "available",
+                        port=row["port"],
+                        pid=row["pid"],
+                    )
+                )
+                changes += 1
+                continue
+
+            updated = False
+            for field in (
+                "hf_id",
+                "gguf_file",
+                "mlx_path",
+                "quantization",
+                "size_gb",
+                "memory_gb",
+                "chat_template",
+                "template_valid",
+                "template_errors",
+                "supports_tools",
+                "port",
+                "pid",
+            ):
+                current = getattr(existing, field)
+                legacy = row[field]
+                if current in (None, "") and legacy not in (None, ""):
+                    setattr(existing, field, legacy)
+                    updated = True
+
+            if (not existing.name or existing.name == existing.id) and row["name"]:
+                existing.name = row["name"]
+                updated = True
+
+            if existing.status == "available" and row["status"] and row["status"] != "available":
+                existing.status = row["status"]
+                updated = True
+
+            if updated:
+                changes += 1
+
+        if changes:
+            session.commit()
+        else:
+            session.rollback()
+        return changes
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()

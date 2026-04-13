@@ -7,6 +7,8 @@ from pathlib import Path
 # Default paths
 DEFAULT_DATA_DIR = Path(os.environ.get("FLOW_DATA_DIR", str(Path.home() / ".flow")))
 DEFAULT_DB_PATH = DEFAULT_DATA_DIR / "flow.db"
+LEGACY_DATA_DIR = Path.home() / ".james"
+LEGACY_DB_PATH = LEGACY_DATA_DIR / "james.db"
 
 _models_dir_env = os.environ.get("FLOW_MODELS_DIR")
 if _models_dir_env:
@@ -78,13 +80,17 @@ class Settings:
         try:
             data = json.loads(sf.read_text())
             persistable = [
+                "models_dir",
                 "default_ctx_size", "default_flash_attn", "default_cache_type_k",
                 "default_cache_type_v", "default_gpu_layers", "default_n_parallel",
                 "auto_update_backends",
             ]
             for key in persistable:
                 if key in data:
-                    setattr(self, key, data[key])
+                    if key == "models_dir":
+                        self.models_dir = Path(data[key]).expanduser()
+                    else:
+                        setattr(self, key, data[key])
         except Exception:
             pass  # Corrupt or missing settings file — use defaults
 
@@ -93,6 +99,7 @@ class Settings:
         sf = self._settings_file()
         sf.parent.mkdir(parents=True, exist_ok=True)
         data = {
+            "models_dir": str(self.models_dir),
             "default_ctx_size": self.default_ctx_size,
             "default_flash_attn": self.default_flash_attn,
             "default_cache_type_k": self.default_cache_type_k,

@@ -82,6 +82,7 @@ export default function SettingsPage() {
   const [cacheTypeV, setCacheTypeV] = useState('q4_0')
   const [gpuLayers, setGpuLayers] = useState(-1)
   const [nParallel, setNParallel] = useState(2)
+  const [modelsDir, setModelsDir] = useState('')
   const [autoUpdate, setAutoUpdate] = useState(true)
   const [saved, setSaved] = useState(false)
 
@@ -93,12 +94,14 @@ export default function SettingsPage() {
       setCacheTypeV(savedSettings.default_cache_type_v)
       setGpuLayers(savedSettings.default_gpu_layers)
       setNParallel(savedSettings.default_n_parallel)
+      setModelsDir(savedSettings.models_dir)
       setAutoUpdate(savedSettings.auto_update_backends ?? true)
     }
   }, [savedSettings])
 
   const saveMut = useMutation({
     mutationFn: () => api.updateSettings({
+      models_dir: modelsDir,
       default_ctx_size: ctxSize,
       default_flash_attn: flashAttn,
       default_cache_type_k: cacheTypeK,
@@ -154,6 +157,22 @@ export default function SettingsPage() {
           These values are used when loading a model. Changes here apply to the Load dialog and Chat page.
         </p>
         <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1">
+              Models Directory
+            </label>
+            <input
+              type="text"
+              value={modelsDir}
+              onChange={e => setModelsDir(e.target.value)}
+              placeholder="/Volumes/YourDrive/llms"
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+            />
+            <p className="text-xs text-gray-400 mt-1">
+              Flow downloads to this folder, and “Scan Local Files” only scans this path for GGUF and MLX models.
+            </p>
+          </div>
+
           {/* Context Window */}
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1">
