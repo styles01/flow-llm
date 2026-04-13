@@ -1,6 +1,6 @@
 # Flow LLM — macOS LLM Orchestration
 
-Local LLM gateway for Apple Silicon. Flow manages local models (GGUF + MLX), proxies OpenAI- and Anthropic-compatible requests, and exposes telemetry — so tools like OpenClaw and Claude Code can talk to local models without Ollama or LM Studio.
+Local LLM gateway for Apple Silicon. Flow manages local models (GGUF + MLX), proxies OpenAI- and Anthropic-compatible requests, and exposes telemetry — so vibe coding tools like OpenClaw, Claude Code, and Codex (via AIRun) can talk to local models without Ollama or LM Studio.
 
 ![Flow LLM](screenshots/flow-llm-monitor-page.png)
 
@@ -63,9 +63,9 @@ curl -X POST http://localhost:3377/api/register-local \
 
 Then load it in the UI with your preferred settings (100K context, flash attention, q4_0 KV cache).
 
-### 3. Configure OpenClaw or Claude Code
+### 3. Configure your coding tool
 
-Point your tool to Flow:
+Point OpenClaw, Claude Code, or Codex (via AIRun) to Flow:
 
 ```json
 {
@@ -81,7 +81,7 @@ Point your tool to Flow:
 }
 ```
 
-For Claude Code, Flow also exposes an Anthropic-compatible endpoint at `POST /v1/messages`.
+Flow also exposes an Anthropic-compatible endpoint at `POST /v1/messages` for Claude Code and other tools that use the Anthropic Messages API.
 
 ## Development
 

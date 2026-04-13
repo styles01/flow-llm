@@ -1,6 +1,6 @@
 # Flow LLM Project Plan
 
-**macOS LLM Orchestration** — phased implementation plan.
+**macOS LLM Orchestration for OpenClaw, Claude Code, and Codex (via AIRun)** — phased implementation plan.
 
 ---
 
