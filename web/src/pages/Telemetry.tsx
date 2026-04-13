@@ -90,16 +90,16 @@ export default function TelemetryPage() {
 
                     {/* Token counts */}
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">In</span>
+                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">In tokens</span>
                       <span className="text-sm font-mono text-gray-300">{formatNumber(r.input_tokens)}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">Out</span>
+                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">Out tokens</span>
                       <span className="text-sm font-mono text-gray-300">{formatNumber(r.output_tokens)}</span>
                     </div>
                     {r.total_tokens != null && (
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] text-gray-500 uppercase tracking-wider">Total</span>
+                        <span className="text-[10px] text-gray-500 uppercase tracking-wider">Total tokens</span>
                         <span className="text-sm font-mono text-gray-400">{formatNumber(r.total_tokens)}</span>
                       </div>
                     )}
