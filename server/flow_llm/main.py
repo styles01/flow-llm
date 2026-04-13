@@ -32,8 +32,10 @@ from flow_llm.template_validator import validate_model_dir
 
 logger = logging.getLogger(__name__)
 
-# Path to frontend build
-WEB_DIST = Path(__file__).parent.parent.parent / "web" / "dist"
+# Path to frontend build (bundled into the package, or fallback to dev build)
+WEB_DIST = Path(__file__).parent / "frontend"
+if not WEB_DIST.exists():
+    WEB_DIST = Path(__file__).parent.parent.parent / "web" / "dist"
 
 # Global state
 db_session_factory = None
@@ -247,25 +249,47 @@ app.add_middleware(
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for real-time updates to the frontend."""
+    """WebSocket endpoint for real-time updates to the frontend.
+
+    On connect, sends an init message with the full request tracker state.
+    Afterwards, request_update / request_removed / slot_update / metrics_update
+    events are pushed in real-time.
+    """
     await websocket.accept()
     ws_connections.append(websocket)
+
+    # Send initial state snapshot
+    try:
+        from flow_llm.request_tracker import get_all_active, prune_completed
+        prune_completed()
+        snapshot = get_all_active()
+        await websocket.send_text(json.dumps({
+            "type": "init",
+            "data": {"requests": snapshot},
+        }))
+    except Exception:
+        pass
+
     try:
         while True:
             # Keep connection alive — frontend sends pings
             await websocket.receive_text()
     except WebSocketDisconnect:
-        ws_connections.remove(websocket)
+        if websocket in ws_connections:
+            ws_connections.remove(websocket)
 
 
 async def broadcast(event_type: str, data: dict):
     """Broadcast an event to all connected WebSocket clients."""
-    import json
-    message = json.dumps({"type": event_type, "data": data})
+    message = json.dumps({"type": event_type, "data": data, "ts": time.time()})
+    dead = []
     for ws in ws_connections[:]:
         try:
             await ws.send_text(message)
         except Exception:
+            dead.append(ws)
+    for ws in dead:
+        if ws in ws_connections:
             ws_connections.remove(ws)
 
 
@@ -1055,25 +1079,27 @@ def _anthropic_stream_error_event(error_type: str, message: str) -> str:
 @app.post("/v1/messages")
 async def anthropic_messages(request: dict):
     """Anthropic-compatible Messages API endpoint for Claude Code and AI-run."""
-    from flow_llm.process_manager import reset_processing_progress
+    from flow_llm.request_tracker import create_request, update_request, complete_request, error_request
 
-    request_id = make_request_id()
+    anthro_request_id = make_request_id()
+    anthro_input_estimate = _estimate_input_tokens(request.get("messages", []))
 
     try:
         openai_request = to_openai_chat_request(request)
     except AnthropicRequestError as exc:
-        return _anthropic_error_response(exc.status_code, exc.error_type, exc.message, request_id)
+        return _anthropic_error_response(exc.status_code, exc.error_type, exc.message, anthro_request_id)
 
     model_name = openai_request.get("model", "")
     proc = process_manager.get_process(model_name)
-    reset_processing_progress(model_name)
+    track_id = create_request(model_name, "/v1/messages")
 
     if not proc:
+        error_request(track_id, f"Model '{model_name}' is not loaded")
         return _anthropic_error_response(
             400,
             "invalid_request_error",
             f"Model '{model_name}' is not loaded. Available: {_available_model_ids()}",
-            request_id,
+            anthro_request_id,
         )
 
     start_time = time.monotonic()
@@ -1089,22 +1115,23 @@ async def anthropic_messages(request: dict):
                 headers={"Content-Type": "application/json"},
             )
             response = await client.send(backend_request, stream=True)
+            update_request(track_id, stage="prefilling")
         except httpx.HTTPError as exc:
             await client.aclose()
-            reset_processing_progress(model_name)
+            error_request(track_id, f"Failed to reach backend: {exc}")
             message = f"Failed to reach backend for model '{model_name}': {exc}"
             await _record_telemetry(
                 model_id=model_name,
                 backend=proc.backend,
                 error=message,
             )
-            return _anthropic_error_response(502, "api_error", message, request_id)
+            return _anthropic_error_response(502, "api_error", message, anthro_request_id)
 
         if response.status_code >= 400:
             payload, raw_text = await _read_backend_error(response)
             await response.aclose()
             await client.aclose()
-            reset_processing_progress(model_name)
+            error_request(track_id, f"Backend error {response.status_code}")
             status_code, error_type, message = _map_backend_error(
                 response.status_code,
                 payload,
@@ -1116,7 +1143,7 @@ async def anthropic_messages(request: dict):
                 backend=proc.backend,
                 error=message,
             )
-            return _anthropic_error_response(status_code, error_type, message, request_id)
+            return _anthropic_error_response(status_code, error_type, message, anthro_request_id)
 
         async def stream_anthropic_events():
             translator = AnthropicStreamTranslator(model_name)
@@ -1128,6 +1155,7 @@ async def anthropic_messages(request: dict):
                         continue
                     data = line[6:]
                     if data == "[DONE]":
+                        update_request(track_id, stage="sending")
                         break
 
                     try:
@@ -1144,6 +1172,12 @@ async def anthropic_messages(request: dict):
 
                     if emitted_output and first_output_time is None:
                         first_output_time = time.monotonic()
+                        ttft = (first_output_time - start_time) * 1000
+                        update_request(track_id, stage="generating", ttft_ms=ttft, first_token_time=first_output_time)
+
+                    # Update token count for the monitor
+                    if translator.output_delta_count:
+                        update_request(track_id, output_tokens=translator.output_delta_count)
 
                     for event in events:
                         yield event
@@ -1155,7 +1189,6 @@ async def anthropic_messages(request: dict):
             finally:
                 await response.aclose()
                 await client.aclose()
-                reset_processing_progress(model_name)
                 end_time = time.monotonic()
                 ttft_ms = (first_output_time - start_time) * 1000 if first_output_time else None
                 elapsed_sec = (end_time - start_time) if first_output_time else None
@@ -1165,12 +1198,20 @@ async def anthropic_messages(request: dict):
                     if final_output_tokens and elapsed_sec and elapsed_sec > 0
                     else None
                 )
+                final_input_tokens = translator.input_tokens or None
+                final_total_tokens = (final_input_tokens + final_output_tokens) if final_input_tokens and final_output_tokens else None
+                complete_request(track_id,
+                    output_tokens=final_output_tokens or 0,
+                    input_tokens=final_input_tokens,
+                    tokens_per_sec=tokens_per_sec,
+                )
                 await _record_telemetry(
                     model_id=model_name,
                     backend=proc.backend,
                     ttft_ms=ttft_ms,
-                    input_tokens=translator.input_tokens or None,
+                    input_tokens=final_input_tokens,
                     output_tokens=final_output_tokens,
+                    total_tokens=final_total_tokens,
                     tokens_per_sec=tokens_per_sec,
                     error=stream_error_message,
                 )
@@ -1178,7 +1219,7 @@ async def anthropic_messages(request: dict):
         return StreamingResponse(
             stream_anthropic_events(),
             media_type="text/event-stream",
-            headers={"request-id": request_id},
+            headers={"request-id": anthro_request_id},
         )
 
     try:
@@ -1189,14 +1230,14 @@ async def anthropic_messages(request: dict):
                 headers={"Content-Type": "application/json"},
             )
     except httpx.HTTPError as exc:
-        reset_processing_progress(model_name)
+        error_request(track_id, f"Failed to reach backend: {exc}")
         message = f"Failed to reach backend for model '{model_name}': {exc}"
         await _record_telemetry(
             model_id=model_name,
             backend=proc.backend,
             error=message,
         )
-        return _anthropic_error_response(502, "api_error", message, request_id)
+        return _anthropic_error_response(502, "api_error", message, anthro_request_id)
 
     if response.status_code >= 400:
         payload, raw_text = _safe_parse_json_text(response.text)
@@ -1206,26 +1247,26 @@ async def anthropic_messages(request: dict):
             raw_text,
             model_name,
         )
-        reset_processing_progress(model_name)
+        error_request(track_id, message)
         await _record_telemetry(
             model_id=model_name,
             backend=proc.backend,
             error=message,
         )
-        return _anthropic_error_response(status_code, error_type, message, request_id)
+        return _anthropic_error_response(status_code, error_type, message, anthro_request_id)
 
     try:
         result = response.json()
         anthropic_result = to_anthropic_response(result, model_name)
     except (ValueError, AnthropicRequestError) as exc:
-        reset_processing_progress(model_name)
         message = exc.message if isinstance(exc, AnthropicRequestError) else f"Failed to decode backend response: {exc}"
+        error_request(track_id, message)
         await _record_telemetry(
             model_id=model_name,
             backend=proc.backend,
             error=message,
         )
-        return _anthropic_error_response(500, "api_error", message, request_id)
+        return _anthropic_error_response(500, "api_error", message, anthro_request_id)
 
     end_time = time.monotonic()
     usage = result.get("usage", {})
@@ -1233,7 +1274,11 @@ async def anthropic_messages(request: dict):
     output_tokens = usage.get("completion_tokens")
     tokens_per_sec = output_tokens / (end_time - start_time) if output_tokens and end_time > start_time else None
 
-    reset_processing_progress(model_name)
+    complete_request(track_id,
+        output_tokens=output_tokens or 0,
+        input_tokens=input_tokens,
+        tokens_per_sec=tokens_per_sec,
+    )
     await _record_telemetry(
         model_id=model_name,
         backend=proc.backend,
@@ -1245,8 +1290,25 @@ async def anthropic_messages(request: dict):
     )
     return JSONResponse(
         content=anthropic_result,
-        headers={"request-id": request_id},
+        headers={"request-id": anthro_request_id},
     )
+
+
+def _estimate_input_tokens(request: dict) -> int | None:
+    """Estimate input token count from the request messages.
+    Used as a fallback when the backend doesn't include usage.prompt_tokens in SSE chunks.
+    Rough estimate: ~4 chars per token for English text."""
+    messages = request.get("messages", [])
+    if not messages:
+        return None
+    total_chars = sum(len(m.get("content", "")) for m in messages if isinstance(m.get("content"), str))
+    # Also count system prompt
+    system = request.get("system")
+    if isinstance(system, str):
+        total_chars += len(system)
+    if total_chars == 0:
+        return None
+    return max(1, total_chars // 4)
 
 
 def _safe_parse_json_text(raw_text: str) -> tuple[Any, str]:
@@ -1268,14 +1330,14 @@ async def chat_completions(request: dict):
     to the correct backend process, collects telemetry, and streams
     responses transparently — no prompt modification.
     """
-    from flow_llm.process_manager import reset_processing_progress
+    from flow_llm.request_tracker import create_request, update_request, complete_request, error_request
     model_name = request.get("model", "")
     proc = process_manager.get_process(model_name)
 
-    # Reset processing progress for this model
-    reset_processing_progress(model_name)
+    track_id = create_request(model_name, "/v1/chat/completions")
 
     if not proc:
+        error_request(track_id, f"Model '{model_name}' is not loaded")
         raise HTTPException(404, f"Model '{model_name}' is not loaded. Available: {list(process_manager.get_all_processes().keys())}")
 
     start_time = time.monotonic()
@@ -1283,6 +1345,9 @@ async def chat_completions(request: dict):
 
     if request.get("stream", False):
         # Streaming response — client must outlive the generator
+        # Estimate input tokens from request messages as a fallback
+        request_input_estimate = _estimate_input_tokens(request)
+
         async def stream_with_metrics():
             first_token_time = None
             total_output_tokens = 0
@@ -1296,10 +1361,12 @@ async def chat_completions(request: dict):
                     json=request,
                     headers={"Content-Type": "application/json"},
                 ) as response:
+                    update_request(track_id, stage="prefilling")
                     async for line in response.aiter_lines():
                         if line.startswith("data: "):
                             data = line[6:]
                             if data == "[DONE]":
+                                update_request(track_id, stage="sending")
                                 yield "data: [DONE]\n\n"
                                 break
                             try:
@@ -1315,7 +1382,11 @@ async def chat_completions(request: dict):
                                 if chunk.get("choices") and chunk["choices"][0].get("delta", {}).get("content"):
                                     if first_token_time is None:
                                         first_token_time = time.monotonic()
+                                        ttft = (first_token_time - start_time) * 1000
+                                        update_request(track_id, stage="generating", ttft_ms=ttft, first_token_time=first_token_time)
                                     total_output_tokens += 1
+                                    # Update token count for monitor (throttled in request_tracker)
+                                    update_request(track_id, output_tokens=total_output_tokens)
                             except Exception:
                                 pass
                             yield line + "\n"
@@ -1325,19 +1396,26 @@ async def chat_completions(request: dict):
                             yield line + "\n"
             finally:
                 await client.aclose()
-                # Clear processing progress
-                reset_processing_progress(model_name)
             end_time = time.monotonic()
             ttft_ms = (first_token_time - start_time) * 1000 if first_token_time else None
             elapsed_sec = (end_time - start_time) if first_token_time else None
             final_output_tokens = output_tokens_from_usage or (total_output_tokens if total_output_tokens else None)
+            # Fallback: estimate input tokens from request if backend didn't report them
+            final_input_tokens = input_tokens or request_input_estimate
+            final_total_tokens = (final_input_tokens + final_output_tokens) if final_input_tokens and final_output_tokens else None
             tokens_per_sec = (final_output_tokens / elapsed_sec) if final_output_tokens and elapsed_sec and elapsed_sec > 0 else None
+            complete_request(track_id,
+                output_tokens=final_output_tokens or 0,
+                input_tokens=final_input_tokens,
+                tokens_per_sec=tokens_per_sec,
+            )
             await _record_telemetry(
                 model_id=model_name,
                 backend=proc.backend,
                 ttft_ms=ttft_ms,
-                input_tokens=input_tokens,
+                input_tokens=final_input_tokens,
                 output_tokens=final_output_tokens,
+                total_tokens=final_total_tokens,
                 tokens_per_sec=tokens_per_sec,
             )
 
@@ -1347,37 +1425,46 @@ async def chat_completions(request: dict):
         )
     else:
         # Non-streaming response
-        async with httpx.AsyncClient(timeout=300.0) as client:
-            response = await client.post(
-                f"{backend_url}/v1/chat/completions",
-                json=request,
-                headers={"Content-Type": "application/json"},
-            )
+        try:
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                response = await client.post(
+                    f"{backend_url}/v1/chat/completions",
+                    json=request,
+                    headers={"Content-Type": "application/json"},
+                )
 
-            result = response.json()
-            end_time = time.monotonic()
+                result = response.json()
+                end_time = time.monotonic()
 
-            # Extract telemetry
-            usage = result.get("usage", {})
-            input_tokens = usage.get("prompt_tokens")
-            output_tokens = usage.get("completion_tokens")
-            total_tokens = usage.get("total_tokens")
+                # Extract telemetry
+                usage = result.get("usage", {})
+                input_tokens = usage.get("prompt_tokens")
+                output_tokens = usage.get("completion_tokens")
+                total_tokens = usage.get("total_tokens")
 
-            # Calculate TTFT (for non-streaming, this is total time)
-            ttft_ms = (end_time - start_time) * 1000
-            tokens_per_sec = output_tokens / ((end_time - start_time)) if output_tokens and (end_time > start_time) else None
+                # Calculate TTFT (for non-streaming, this is total time)
+                ttft_ms = (end_time - start_time) * 1000
+                tokens_per_sec = output_tokens / ((end_time - start_time)) if output_tokens and (end_time > start_time) else None
 
-            await _record_telemetry(
-                model_id=model_name,
-                backend=proc.backend,
-                ttft_ms=ttft_ms,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                total_tokens=total_tokens,
-                tokens_per_sec=tokens_per_sec,
-            )
+                complete_request(track_id,
+                    output_tokens=output_tokens or 0,
+                    input_tokens=input_tokens,
+                    tokens_per_sec=tokens_per_sec,
+                )
+                await _record_telemetry(
+                    model_id=model_name,
+                    backend=proc.backend,
+                    ttft_ms=ttft_ms,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=total_tokens,
+                    tokens_per_sec=tokens_per_sec,
+                )
 
-            return result
+                return result
+        except Exception as exc:
+            error_request(track_id, str(exc))
+            raise
 
 
 @app.get("/v1/models")
@@ -1441,6 +1528,7 @@ def _looks_like_mlx_model_dir(path: Path) -> bool:
 
 class UpdateSettingsRequest(BaseModel):
     models_dir: Optional[str] = None
+    port: Optional[int] = None
     default_ctx_size: Optional[int] = None
     default_flash_attn: Optional[str] = None
     default_cache_type_k: Optional[str] = None
@@ -1454,6 +1542,7 @@ class UpdateSettingsRequest(BaseModel):
 async def get_settings():
     """Get current default settings for model loading."""
     return {
+        "port": settings.port,
         "default_ctx_size": settings.default_ctx_size,
         "default_flash_attn": settings.default_flash_attn,
         "default_cache_type_k": settings.default_cache_type_k,
@@ -1473,6 +1562,10 @@ async def update_settings(request: UpdateSettingsRequest):
             raise HTTPException(400, "models_dir cannot be empty")
         settings.models_dir = Path(request.models_dir).expanduser()
         settings.models_dir.mkdir(parents=True, exist_ok=True)
+    if request.port is not None:
+        if request.port < 1 or request.port > 65535:
+            raise HTTPException(400, "port must be between 1 and 65535")
+        settings.port = request.port
     if request.default_ctx_size is not None:
         settings.default_ctx_size = request.default_ctx_size
     if request.default_flash_attn is not None:
@@ -1572,9 +1665,11 @@ def _parse_prometheus_metrics(text: str) -> dict[str, float]:
 
 @app.get("/api/model-activity")
 async def model_activity():
-    """Get live per-model activity: per-slot prefill/generation state + metrics."""
+    """Get live per-model activity: per-slot prefill/generation state, metrics, and active requests."""
     from flow_llm.process_manager import get_slot_states
+    from flow_llm.request_tracker import get_requests_for_model, prune_completed
 
+    prune_completed()
     running = process_manager.get_all_processes()
     activity: dict[str, dict] = {}
 
@@ -1596,6 +1691,7 @@ async def model_activity():
                 "slots_deferred": None,
                 "tokens_per_sec": None,
                 "kv_cache_usage": None,
+                "requests": get_requests_for_model(model_id),
             }
 
             # Supplement with Prometheus metrics from llama-server
@@ -1617,6 +1713,14 @@ async def model_activity():
             activity[model_id] = info
 
     return {"activity": activity}
+
+
+@app.get("/api/requests")
+async def get_requests():
+    """Get all active tracked requests (polling fallback for WebSocket)."""
+    from flow_llm.request_tracker import get_all_active, prune_completed
+    prune_completed()
+    return {"requests": get_all_active()}
 
 
 # --- Serve frontend ---

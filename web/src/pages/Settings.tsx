@@ -83,6 +83,7 @@ export default function SettingsPage() {
   const [gpuLayers, setGpuLayers] = useState(-1)
   const [nParallel, setNParallel] = useState(2)
   const [modelsDir, setModelsDir] = useState('')
+  const [serverPort, setServerPort] = useState(3377)
   const [autoUpdate, setAutoUpdate] = useState(true)
   const [saved, setSaved] = useState(false)
 
@@ -95,6 +96,7 @@ export default function SettingsPage() {
       setGpuLayers(savedSettings.default_gpu_layers)
       setNParallel(savedSettings.default_n_parallel)
       setModelsDir(savedSettings.models_dir)
+      setServerPort(savedSettings.port ?? 3377)
       setAutoUpdate(savedSettings.auto_update_backends ?? true)
     }
   }, [savedSettings])
@@ -102,6 +104,7 @@ export default function SettingsPage() {
   const saveMut = useMutation({
     mutationFn: () => api.updateSettings({
       models_dir: modelsDir,
+      port: serverPort,
       default_ctx_size: ctxSize,
       default_flash_attn: flashAttn,
       default_cache_type_k: cacheTypeK,
@@ -146,6 +149,32 @@ export default function SettingsPage() {
               <p className="text-xs text-gray-400">Running Models</p>
               <p className="font-medium">{health?.running_models ?? 0}</p>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Server */}
+      <section className="mb-8">
+        <h3 className="text-lg font-semibold mb-3 text-gray-300">Server</h3>
+        <p className="text-sm text-gray-400 mb-4">
+          Flow server settings. Port changes require a restart.
+        </p>
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1">
+              Port
+            </label>
+            <input
+              type="number"
+              value={serverPort}
+              onChange={e => setServerPort(Number(e.target.value))}
+              min={1}
+              max={65535}
+              className="w-32 px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+            />
+            <p className="text-xs text-gray-400 mt-1">
+              The port Flow runs on (default: 3377). Restart required.
+            </p>
           </div>
         </div>
       </section>

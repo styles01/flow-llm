@@ -24,16 +24,8 @@ Flow LLM requires **inference backends** to run models. Install at least one:
 ### llama.cpp (required for GGUF models)
 
 ```bash
-# Install via Homebrew
 brew install llama.cpp
-
-# Or build from source
-git clone https://github.com/ggml-org/llama.cpp
-cd llama.cpp && mkdir build && cd build
-cmake .. -DGGML_METAL=on && cmake --build . --config Release
 ```
-
-This provides the `llama-server` command used to run GGUF models with Metal GPU acceleration.
 
 ### mlx-openai-server (optional, for MLX models)
 
@@ -41,51 +33,19 @@ This provides the `llama-server` command used to run GGUF models with Metal GPU 
 pip install mlx-openai-server
 ```
 
-This provides the `mlx-openai-server` command for running MLX-format models. MLX models can be faster on Apple Silicon but have fewer compatible models than GGUF.
-
-### Verify installations
-
-```bash
-llama-server --version    # Should print llama.cpp version
-mlx-openai-server --help  # Should print help (optional, skip if not using MLX)
-```
-
 ## Quick Start
 
-### 1. Install Python dependencies
+### 1. Install and run
 
 ```bash
-cd server
-pip install -e .
-```
-
-### 2. Start the backend
-
-```bash
+git clone https://github.com/styles01/flow-llm.git
+cd flow-llm && ./setup.sh
 flow
 ```
 
-Server starts on **http://localhost:3377**
+Open **http://localhost:3377** — everything (API + UI) is served from a single process.
 
-### 3. Start the frontend (dev mode)
-
-```bash
-cd web
-npm install
-npm run dev
-```
-
-Frontend at **http://localhost:5173** (proxies API to backend)
-
-Or build and serve from the backend:
-
-```bash
-cd web && npm run build
-cd ../server && flow
-# Everything at http://localhost:3377
-```
-
-### 4. Connect a running model
+### 2. Connect a model
 
 If you already have a llama-server running (e.g. from `gemma4.sh`):
 
@@ -103,9 +63,9 @@ curl -X POST http://localhost:3377/api/register-local \
 
 Then load it in the UI with your preferred settings (100K context, flash attention, q4_0 KV cache).
 
-### 5. Configure OpenClaw
+### 3. Configure OpenClaw or Claude Code
 
-Point OpenClaw to Flow:
+Point your tool to Flow:
 
 ```json
 {
@@ -119,6 +79,25 @@ Point OpenClaw to Flow:
     }
   }
 }
+```
+
+For Claude Code, Flow also exposes an Anthropic-compatible endpoint at `POST /v1/messages`.
+
+## Development
+
+For contributors who want to work on the frontend with hot reload:
+
+```bash
+cd server && pip install -e .
+cd ../web && npm install && npm run dev
+```
+
+Frontend dev server runs at **http://localhost:5173** and proxies API requests to the backend.
+
+To rebuild the bundled frontend after changes:
+
+```bash
+./build_frontend.sh
 ```
 
 ## Dependencies

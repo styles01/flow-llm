@@ -23,7 +23,8 @@ else:
 
 # Server defaults
 DEFAULT_HOST = "0.0.0.0"
-DEFAULT_PORT = 3377
+_flow_port_env = os.environ.get("FLOW_PORT")
+DEFAULT_PORT = int(_flow_port_env) if _flow_port_env else 3377
 DEFAULT_API_PREFIX = "/api"
 
 # Backend defaults
@@ -80,7 +81,7 @@ class Settings:
         try:
             data = json.loads(sf.read_text())
             persistable = [
-                "models_dir",
+                "models_dir", "port",
                 "default_ctx_size", "default_flash_attn", "default_cache_type_k",
                 "default_cache_type_v", "default_gpu_layers", "default_n_parallel",
                 "auto_update_backends",
@@ -100,6 +101,7 @@ class Settings:
         sf.parent.mkdir(parents=True, exist_ok=True)
         data = {
             "models_dir": str(self.models_dir),
+            "port": self.port,
             "default_ctx_size": self.default_ctx_size,
             "default_flash_attn": self.default_flash_attn,
             "default_cache_type_k": self.default_cache_type_k,

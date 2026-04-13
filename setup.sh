@@ -78,12 +78,9 @@ install_python() {
 
 # --- Install and build frontend ---
 install_frontend() {
-  info "Installing frontend dependencies..."
-  cd "$(dirname "$0")/web"
-  npm install --silent
-  info "Building frontend..."
-  npm run build
-  info "Frontend built"
+  info "Building frontend and bundling into Python package..."
+  "$(dirname "$0")/build_frontend.sh"
+  info "Frontend bundled"
 }
 
 # --- Main ---
@@ -97,8 +94,8 @@ main() {
   check_python
   check_node
   check_backends
-  install_python
   install_frontend
+  install_python
 
   echo ""
   echo "╔════════════════════════════════════════╗"

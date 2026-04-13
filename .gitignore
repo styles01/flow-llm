@@ -4,6 +4,7 @@ __pycache__/
 *.db
 server/*.egg-info/
 server/.pytest_cache/
+server/flow_llm/frontend/
 web/dist/
 web/node_modules/
 node_modules/

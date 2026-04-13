@@ -116,6 +116,7 @@ export interface TelemetryRecord {
 }
 
 export interface AppSettings {
+  port: number
   default_ctx_size: number
   default_flash_attn: string
   default_cache_type_k: string
@@ -143,12 +144,28 @@ export interface SlotActivity {
   progress: number   // 0-1 during prefill, 1.0 when generating
 }
 
+export interface TrackedRequest {
+  request_id: string
+  model_id: string
+  route: string
+  stage: 'queued' | 'prefilling' | 'generating' | 'sending' | 'completed' | 'error'
+  started_at: number
+  output_tokens: number
+  input_tokens: number | null
+  tokens_per_sec: number | null
+  ttft_ms: number | null
+  first_token_time: number | null
+  error_message: string | null
+  completed_at: number | null
+}
+
 export interface ModelActivity {
   slots: SlotActivity[]          // one entry per active slot
   slots_processing: number | null
   slots_deferred: number | null
   tokens_per_sec: number | null
   kv_cache_usage: number | null
+  requests: TrackedRequest[]     // active requests from request tracker
 }
 
 export const api = {
@@ -236,7 +253,11 @@ export const api = {
   updateBackend: (backend: 'llamacpp' | 'mlx') =>
     fetchAPI<{ status: string }>(`/update-backend/${backend}`, { method: 'POST' }),
 
-  // Live model activity (slots, token rate, KV cache)
+  // Live model activity (slots, token rate, KV cache, requests)
   getModelActivity: () =>
     fetchAPI<{ activity: Record<string, ModelActivity> }>('/model-activity'),
+
+  // Active request tracker (polling fallback for WebSocket)
+  getRequests: () =>
+    fetchAPI<{ requests: Record<string, TrackedRequest[]> }>('/requests'),
 };
