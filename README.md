@@ -1,6 +1,6 @@
 # Flow LLM — macOS LLM Orchestration
 
-Local LLM gateway for Apple Silicon. Flow manages local models (GGUF + MLX), proxies OpenAI- and Anthropic-compatible requests, and exposes telemetry — so vibe coding tools like OpenClaw, Claude Code, and Codex (via AIRun) can talk to local models without Ollama or LM Studio.
+An alternative to Ollama and LM Studio for running local models with AI coding agents. Flow is a local LLM gateway for Apple Silicon that manages GGUF and MLX models, proxies OpenAI- and Anthropic-compatible API requests, and exposes real-time telemetry — so tools like OpenClaw, Hermes, Claude Code, and Codex (via AIRun) can talk to local models without Ollama or LM Studio.
 
 ![Flow LLM](screenshots/flow-llm-monitor-page.png)
 
