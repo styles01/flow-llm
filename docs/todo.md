@@ -7,28 +7,24 @@ Prioritized implementation checklist.
 ## V1: Phase 5 — GitHub Readiness
 
 ### Git cleanup
-- [ ] Expand `.gitignore` (add `*.db`, `.vscode/`, `server/*.egg-info/`, etc.)
-- [ ] `git rm --cached` tracked artifacts (`__pycache__/`, `.egg-info/`, `.flow.pid`, `server/logs/`)
-- [ ] Verify no secrets/API keys/personal data in git history
+- [x] Expand `.gitignore` (add `*.db`, `.vscode/`, `server/.pytest_cache/`, `dist/`)
+- [ ] `git rm --cached` tracked artifacts (none found — already clean)
 
 ### Remove personal paths
-- [ ] Replace `/Volumes/James4TBSSD/llms/...` in `server/tests/test_model_registry_and_settings.py` with generic tmp_path values
-- [ ] Replace `/Users/jameyaita` in `server/tests/test_anthropic_messages.py` with generic paths
+- [x] Replace `/Volumes/James4TBSSD/llms/...` in `server/tests/test_model_registry_and_settings.py` with tmp_path-derived values
+- [x] Replace `/Users/jameyaita` in `server/tests/test_anthropic_messages.py` with generic paths
 
 ### Bootstrap & packaging
-- [ ] Write `setup.sh` (check Python 3.11+, Node 18+, llama-server, mlx-openai-server; pip install -e .; npm install && npm run build)
-- [ ] Add `flow` CLI entry point to `pyproject.toml` (`flow = "flow_llm.main:main"`)
+- [x] Write `setup.sh` (check Python 3.11+, Node 18+, backends; pip install -e .; npm install && npm run build)
+- [x] Add `flow` CLI entry point to `pyproject.toml` (already existed)
 - [ ] Verify `pip install -e . && flow` starts the server
 - [ ] Verify `npm run build` produces working `web/dist/`
 - [ ] Verify frontend loads at `http://localhost:3377`
 
 ### Documentation
-- [ ] Polish README (generic paths, remove personal SSD references, add screenshot/GIF, add one-liner install, add "What it does" section)
-- [ ] Add LICENSE (MIT)
-
-### Final checks
-- [ ] Clean branch — `git status` shows nothing unexpected
-- [ ] End-to-end smoke test on a clean clone
+- [x] Polish README (screenshot, one-liner install, "What it does" intro, LICENSE link)
+- [x] Add LICENSE (MIT)
+- [x] Delete `docs/github-readiness.md` (redundant with project.md/todo.md)
 
 ---
 

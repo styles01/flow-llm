@@ -1,6 +1,21 @@
 # Flow LLM — macOS LLM Orchestration
 
-Local LLM gateway for OpenClaw on Apple Silicon. Flow manages local models, proxies OpenAI-compatible requests, and exposes telemetry, logs, and backend update controls for local inference backends.
+Local LLM gateway for Apple Silicon. Flow manages local models (GGUF + MLX), proxies OpenAI- and Anthropic-compatible requests, and exposes telemetry — so tools like OpenClaw and Claude Code can talk to local models without Ollama or LM Studio.
+
+![Flow LLM](screenshots/flow-llm-monitor-page.png)
+
+## Quick Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/styles01/flow-llm/main/setup.sh | bash
+```
+
+Or clone and run manually:
+
+```bash
+git clone https://github.com/styles01/flow-llm.git
+cd flow-llm && ./setup.sh
+```
 
 ## Prerequisites
 
@@ -160,9 +175,18 @@ See [docs/architecture.md](docs/architecture.md) for the full design.
 | `web/src/pages/Telemetry.tsx` | Request log table |
 | `web/src/components/LoadDialog.tsx` | Model loading controls (context, parallel slots, flash attention, KV cache) |
 | `web/src/api/client.ts` | API client for frontend |
+
+## Development
+
+| File | Purpose |
+|------|---------|
 | `gemma4.sh` | Launch script for Gemma 4 on llama-server |
 | `start.sh` | Start backend + frontend |
 | `.vscode/launch.json` | VS Code debug configuration |
+
+## License
+
+[MIT](LICENSE)
 
 ## Port Layout
 
@@ -209,6 +233,7 @@ See [docs/architecture.md](docs/architecture.md) for the full design.
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
 | POST | `/v1/chat/completions` | Route to backend by model name (streaming + non-streaming) |
+| POST | `/v1/messages` | Anthropic-compatible Messages API (for Claude Code / AI-run) |
 | GET | `/v1/models` | List available models |
 
 ### WebSocket

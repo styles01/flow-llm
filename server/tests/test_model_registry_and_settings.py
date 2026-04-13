@@ -60,6 +60,7 @@ def test_migrate_legacy_registry_imports_and_enriches_models(tmp_path):
         )
         """
     )
+    gguf_path = str(tmp_path / "models" / "gemma4-26b-q4" / "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf")
     conn.execute(
         """
         INSERT INTO models (
@@ -73,7 +74,7 @@ def test_migrate_legacy_registry_imports_and_enriches_models(tmp_path):
             "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf",
             None,
             "gguf",
-            "/Volumes/James4TBSSD/llms/gemma4-26b-q4/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf",
+            gguf_path,
             None,
             "Q4_K_M",
             15.2,
@@ -87,6 +88,7 @@ def test_migrate_legacy_registry_imports_and_enriches_models(tmp_path):
             None,
         ),
     )
+    mlx_path = str(tmp_path / "models" / "mlx-community__Phi-3.5-mini-instruct-4bit")
     conn.execute(
         """
         INSERT INTO models (
@@ -101,7 +103,7 @@ def test_migrate_legacy_registry_imports_and_enriches_models(tmp_path):
             None,
             "mlx",
             None,
-            "/Volumes/James4TBSSD/llms/mlx-community__Phi-3.5-mini-instruct-4bit",
+            mlx_path,
             None,
             2.3,
             None,
@@ -125,12 +127,12 @@ def test_migrate_legacy_registry_imports_and_enriches_models(tmp_path):
         gemma = session.query(Model).filter(Model.id == "gemma-4-26B-A4B-it-UD-Q4_K_M").first()
         phi = session.query(Model).filter(Model.id == "mlx-community__Phi-3.5-mini-instruct-4bit").first()
         assert gemma is not None
-        assert gemma.gguf_file == "/Volumes/James4TBSSD/llms/gemma4-26b-q4/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf"
+        assert gemma.gguf_file == gguf_path
         assert gemma.quantization == "Q4_K_M"
         assert gemma.status == "running"
         assert phi is not None
         assert phi.backend == "mlx"
-        assert phi.mlx_path == "/Volumes/James4TBSSD/llms/mlx-community__Phi-3.5-mini-instruct-4bit"
+        assert phi.mlx_path == mlx_path
     finally:
         session.close()
 

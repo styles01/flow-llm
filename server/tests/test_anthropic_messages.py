@@ -307,7 +307,7 @@ def test_tool_result_followup_becomes_openai_tool_message(monkeypatch):
                 {
                     "role": "user",
                     "content": [
-                        {"type": "tool_result", "tool_use_id": "call_1", "content": "Users/jameyaita"},
+                        {"type": "tool_result", "tool_use_id": "call_1", "content": "/home/user/project"},
                         {"type": "text", "text": "Summarize it"},
                     ],
                 },
@@ -329,7 +329,7 @@ def test_tool_result_followup_becomes_openai_tool_message(monkeypatch):
                 }
             ],
         },
-        {"role": "tool", "tool_call_id": "call_1", "content": "Users/jameyaita"},
+        {"role": "tool", "tool_call_id": "call_1", "content": "/home/user/project"},
         {"role": "user", "content": "Summarize it"},
     ]
 

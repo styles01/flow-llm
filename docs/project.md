@@ -99,12 +99,12 @@
 
 | Task | Status |
 |------|--------|
-| Expand `.gitignore` + `git rm --cached` tracked artifacts | ⬜ Not started |
-| Remove hardcoded personal paths from tests | ⬜ Not started — `/Volumes/James4TBSSD/` and `/Users/jameyaita` in test files |
-| Write `setup.sh` bootstrap script | ⬜ Not started |
-| Add `flow` CLI entry point to `pyproject.toml` | ⬜ Not started |
-| Polish README (generic paths, screenshot, one-liner install) | ⬜ Not started |
-| Add LICENSE (MIT) | ⬜ Not started |
+| Expand `.gitignore` + `git rm --cached` tracked artifacts | ✅ Done |
+| Remove hardcoded personal paths from tests | ✅ Done — replaced with generic paths |
+| Write `setup.sh` bootstrap script | ✅ Done |
+| Add `flow` CLI entry point to `pyproject.toml` | ✅ Done (already existed) |
+| Polish README (generic paths, screenshot, one-liner install) | ✅ Done |
+| Add LICENSE (MIT) | ✅ Done |
 | Verify `pip install -e . && flow` works end-to-end | ⬜ Not started |
 | Verify `npm run build` produces working frontend | ⬜ Not started |
 | Verify frontend loads at `http://localhost:3377` | ⬜ Not started |

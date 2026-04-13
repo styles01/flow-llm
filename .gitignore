@@ -1,13 +1,17 @@
 __pycache__/
 *.pyc
 *.pyo
+*.db
 server/*.egg-info/
+server/.pytest_cache/
 web/dist/
 web/node_modules/
 node_modules/
+dist/
 .flow.pid
 server/logs/
 .env
 .env.*
+.vscode/
 .DS_Store
 .claude/
