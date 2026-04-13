@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ModelsPage from './pages/Models'
-import RunningPage from './pages/Running'
+import MonitorPage from './pages/Monitor'
 import ChatPage from './pages/Chat'
 import LogsPage from './pages/Logs'
 import TelemetryPage from './pages/Telemetry'
@@ -25,7 +25,7 @@ function App() {
             <ConnectionBanner />
             <Routes>
               <Route path="/" element={<ModelsPage />} />
-              <Route path="/running" element={<RunningPage />} />
+              <Route path="/running" element={<MonitorPage />} />
               <Route path="/chat" element={<ChatPage />} />
               <Route path="/logs" element={<LogsPage />} />
               <Route path="/telemetry" element={<TelemetryPage />} />

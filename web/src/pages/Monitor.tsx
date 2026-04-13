@@ -1,87 +1,92 @@
+/**
+ * Monitor page — real-time per-request monitoring of model activity.
+ * Replaces the old "Instances" page.
+ */
+
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, type ModelActivity } from '../api/client'
 import { EmptyState } from '../components/EmptyState'
+import { RequestBeam } from '../components/RequestBeam'
+import { IdleWaveform } from '../components/IdleWaveform'
+import { useWebSocket } from '../hooks/useWebSocket'
+import { useMonitor, monitorActions, type TrackedRequest } from '../store/monitorStore'
+import { useEffect } from 'react'
 
-function ActivityStrip({ activity }: { activity: ModelActivity | undefined }) {
-  const activeSlots = activity?.slots ?? []
-  const { slots_deferred, tokens_per_sec, kv_cache_usage } = activity ?? {}
+function RequestPipeline({
+  modelId,
+  activity,
+}: {
+  modelId: string
+  activity: ModelActivity | undefined
+}) {
+  const monitor = useMonitor()
+  const requests = monitor.requests[modelId] || []
+  const slots = monitor.slots[modelId] || activity?.slots || []
+  const metrics = monitor.metrics[modelId] || {
+    slots_processing: activity?.slots_processing ?? null,
+    slots_deferred: activity?.slots_deferred ?? null,
+    tokens_per_sec: activity?.tokens_per_sec ?? null,
+    kv_cache_usage: activity?.kv_cache_usage ?? null,
+  }
 
-  const generatingSlots = activeSlots.filter(s => s.state === 'generating')
-  const prefillSlots = activeSlots.filter(s => s.state === 'prefill')
-  const isIdle = activeSlots.length === 0 && !slots_deferred
+  // Merge: if no WS data yet, use polling data
+  const activeRequests = requests.length > 0
+    ? requests
+    : (activity?.requests || []).map(r => r as TrackedRequest)
+
+  const queuedCount = metrics.slots_deferred ?? 0
+  const hasActiveRequests = activeRequests.some(r =>
+    r.stage !== 'completed' && r.stage !== 'error'
+  )
+  const isIdle = activeRequests.length === 0 || !hasActiveRequests
 
   return (
     <div className="mt-3 pt-3 border-t border-gray-800 space-y-2">
+      {/* Active request beams */}
+      {activeRequests.map((req) => {
+        // Find matching slot for prefill progress
+        const matchingSlot = slots.find(s =>
+          s.state === 'prefill' && req.stage === 'prefilling'
+        )
+        return (
+          <RequestBeam
+            key={req.request_id}
+            request={req}
+            prefillProgress={matchingSlot?.progress}
+            queuePosition={req.stage === 'queued' ? queuedCount : undefined}
+          />
+        )
+      })}
 
-      {/* Per-slot prefill progress bars */}
-      {prefillSlots.map(slot => (
-        <div key={slot.slot_id} className="flex items-center gap-2">
-          <span className="text-xs text-gray-500 w-12 shrink-0">
-            slot {slot.slot_id}
-          </span>
-          <div className="flex-1 bg-gray-800 rounded-full h-2 overflow-hidden">
-            <div
-              className="h-2 bg-amber-400 rounded-full transition-all duration-300"
-              style={{ width: `${slot.progress * 100}%` }}
-            />
-          </div>
-          <span className="text-xs text-amber-400 w-10 text-right shrink-0">
-            {Math.round(slot.progress * 100)}%
-          </span>
-          <span className="text-xs text-gray-500 shrink-0">prefill</span>
-        </div>
-      ))}
-
-      {/* Generating slots */}
-      {generatingSlots.map(slot => (
-        <div key={slot.slot_id} className="flex items-center gap-2 text-xs">
-          <span className="text-gray-500 w-12 shrink-0">slot {slot.slot_id}</span>
-          <span className="inline-block w-1.5 h-1.5 rounded-full bg-teal-400 animate-ping shrink-0" />
-          <span className="text-teal-400">Generating</span>
-          {tokens_per_sec != null && tokens_per_sec > 0 && (
-            <span className="text-gray-400">{tokens_per_sec.toFixed(1)} tok/s</span>
-          )}
-        </div>
-      ))}
-
-      {/* Queued turns */}
-      {slots_deferred != null && slots_deferred > 0 && (
+      {/* Queue indicator (when there are deferred requests not yet in the tracker) */}
+      {queuedCount > 0 && !activeRequests.some(r => r.stage === 'queued') && (
         <div className="flex items-center gap-2 text-xs text-gray-500">
-          <span className="w-12 shrink-0" />
-          <span>{slots_deferred} turn{slots_deferred > 1 ? 's' : ''} queued</span>
+          <span className="w-1.5 h-1.5 rounded-full bg-gray-600 shrink-0" />
+          <span>{queuedCount} request{queuedCount > 1 ? 's' : ''} queued</span>
         </div>
       )}
 
-      {/* Idle */}
-      {isIdle && (
-        <div className="flex items-center gap-2 text-xs">
-          <span className="text-gray-600">Idle</span>
-          {kv_cache_usage != null && kv_cache_usage > 0.02 && (
-            <span className="text-gray-600 ml-2">
-              KV {Math.round(kv_cache_usage * 100)}% used
-            </span>
-          )}
-        </div>
-      )}
+      {/* Idle waveform when no active requests */}
+      {isIdle && <IdleWaveform kvCacheUsage={metrics.kv_cache_usage} />}
 
-      {/* KV cache bar (when active) */}
-      {!isIdle && kv_cache_usage != null && kv_cache_usage > 0.02 && (
+      {/* KV cache bar (when active or significant) */}
+      {metrics.kv_cache_usage != null && metrics.kv_cache_usage > 0.02 && !isIdle && (
         <div className="flex items-center gap-2 text-xs">
           <span className="text-gray-600 w-12 shrink-0">KV cache</span>
           <div className="w-24 bg-gray-800 rounded-full h-1.5">
             <div
-              className={`h-1.5 rounded-full transition-all ${kv_cache_usage > 0.85 ? 'bg-fuchsia-500' : 'bg-gray-600'}`}
-              style={{ width: `${kv_cache_usage * 100}%` }}
+              className={`h-1.5 rounded-full transition-all ${metrics.kv_cache_usage > 0.85 ? 'bg-fuchsia-500' : 'bg-gray-600'}`}
+              style={{ width: `${metrics.kv_cache_usage * 100}%` }}
             />
           </div>
-          <span className="text-gray-600">{Math.round(kv_cache_usage * 100)}%</span>
+          <span className="text-gray-600">{Math.round(metrics.kv_cache_usage * 100)}%</span>
         </div>
       )}
     </div>
   )
 }
 
-export default function RunningPage() {
+export default function MonitorPage() {
   const queryClient = useQueryClient()
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['running'],
@@ -93,6 +98,35 @@ export default function RunningPage() {
     queryKey: ['model-activity'],
     queryFn: () => api.getModelActivity(),
     refetchInterval: 1000,
+  })
+
+  // Merge polling data into monitor store
+  useEffect(() => {
+    if (activityData?.activity) {
+      monitorActions.mergePollData(activityData.activity as any)
+    }
+  }, [activityData])
+
+  // WebSocket for real-time updates
+  useWebSocket('/ws', (msg) => {
+    switch (msg.type) {
+      case 'init':
+        monitorActions.handleInit(msg.data)
+        monitorActions.setConnected(true)
+        break
+      case 'request_update':
+        monitorActions.handleRequestUpdate(msg.data)
+        break
+      case 'request_removed':
+        monitorActions.handleRequestRemoved(msg.data)
+        break
+      case 'slot_update':
+        monitorActions.handleSlotUpdate(msg.data)
+        break
+      case 'metrics_update':
+        monitorActions.handleMetricsUpdate(msg.data)
+        break
+    }
   })
 
   const unloadMut = useMutation({
@@ -109,7 +143,16 @@ export default function RunningPage() {
   return (
     <div className="p-6 max-w-6xl">
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold">Instances</h2>
+        <div className="flex items-center gap-3">
+          <h2 className="text-2xl font-bold">Monitor</h2>
+          {/* Live indicator */}
+          {models.length > 0 && (
+            <span className="flex items-center gap-1.5 text-xs text-teal-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse" />
+              Live
+            </span>
+          )}
+        </div>
         <button
           onClick={() => refetch()}
           className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-sm"
@@ -118,7 +161,7 @@ export default function RunningPage() {
         </button>
       </div>
 
-      {/* Hardware info */}
+      {/* Hardware info — compact */}
       {hw && (
         <div className="mb-6 bg-gray-900 border border-gray-800 rounded-lg p-4">
           <h3 className="text-sm font-medium text-gray-400 mb-2">Hardware</h3>
@@ -161,8 +204,8 @@ export default function RunningPage() {
       ) : models.length === 0 ? (
         <EmptyState
           title="No models running"
-          description="Load a model to get started."
-          illustration="instances"
+          description="Load a model to start monitoring activity."
+          illustration="monitor"
           action={{ label: 'Go to Models', linkTo: '/models' }}
         />
       ) : (
@@ -199,7 +242,10 @@ export default function RunningPage() {
                   </button>
                 </div>
               </div>
-              <ActivityStrip activity={activityData?.activity[m.model_id]} />
+              <RequestPipeline
+                modelId={m.model_id}
+                activity={activityData?.activity[m.model_id]}
+              />
             </div>
           ))}
         </div>

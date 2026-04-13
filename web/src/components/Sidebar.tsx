@@ -47,7 +47,7 @@ const icons = {
 
 const navItems = [
   { to: '/', label: 'Models', icon: icons.models, badge: null as string | null },
-  { to: '/running', label: 'Instances', icon: icons.instances, badge: 'running' as const },
+  { to: '/running', label: 'Monitor', icon: icons.instances, badge: 'running' as const },
   { to: '/chat', label: 'Chat', icon: icons.chat, badge: null as string | null },
   { to: '/logs', label: 'Logs', icon: icons.logs, badge: null as string | null },
   { to: '/telemetry', label: 'Telemetry', icon: icons.telemetry, badge: null as string | null },

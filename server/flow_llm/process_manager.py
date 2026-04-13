@@ -32,8 +32,9 @@ def get_processing_progress(model_id: str) -> Optional[float]:
 
 
 def reset_processing_progress(model_id: str):
-    """Called at start of each proxy request — clears any stale slot state."""
-    _slot_states.pop(model_id, None)
+    """No-op kept for backward compat. Slot states are now managed per-slot
+    by _clear_slot() and _update_slot() only."""
+    pass
 
 
 def _update_slot(model_id: str, slot_id: int, **kwargs):
@@ -152,7 +153,9 @@ class BackendProcess:
                 if slot_id is None:
                     # "srv  update_slots: all slots are idle"
                     if 'all slots are idle' in text:
-                        _slot_states.pop(self.model_id, None)
+                        # Clear each active slot individually instead of nuking all
+                        for sid in list(_slot_states.get(self.model_id, {}).keys()):
+                            _clear_slot(self.model_id, sid)
                     continue
 
                 # Prefill progress line

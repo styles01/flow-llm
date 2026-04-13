@@ -473,7 +473,7 @@ export default function ChatPage() {
       {lastTelemetry && (
         <div className="shrink-0 px-4 py-1.5 bg-gray-900/50 border-t border-gray-800">
           <div className="max-w-3xl mx-auto flex gap-4 text-xs text-gray-500">
-            <span>{lastTelemetry.ttft_ms?.toFixed(0)}ms TTFT</span>
+            <span>{lastTelemetry.ttft_ms != null ? `${(lastTelemetry.ttft_ms / 1000).toFixed(1)}s` : '-'} TTFT</span>
             <span className="text-gray-700">·</span>
             <span>{lastTelemetry.tokens_per_sec?.toFixed(1)} tok/s</span>
             <span className="text-gray-700">·</span>

@@ -87,3 +87,9 @@
   50%  { transform: translateX(150%); }
   100% { transform: translateX(-100%); }
 }
+
+/* Beam sweep animation for generating request beams */
+@keyframes beam-sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}

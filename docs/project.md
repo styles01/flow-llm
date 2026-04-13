@@ -69,11 +69,11 @@
 | Task | Status |
 |------|--------|
 | Model Browser page | ✅ Done — HF search, local models, register GGUF, connect external |
-| Running Models page | ✅ Done — dashboard with memory bar, status indicators, live activity |
+| Monitor page | ✅ Done — real-time per-request tracking, token counter, request beams, WebSocket push |
 | Chat Test page | ✅ Done — system prompt, streaming, tool calling, inline model loading |
 | Logs page | ✅ Done — backend log viewer with per-model filter |
 | Settings page | ✅ Done — loading defaults, models dir, backend versions/updates, hardware info, OpenClaw config |
-| Telemetry page | ✅ Done — request log table |
+| Telemetry page | ✅ Done — card-based request log with TTFT color-coding and token formatting |
 | Load dialog | ✅ Done — context window, parallel slots, flash attention, KV cache, GPU layers |
 
 ---
@@ -84,12 +84,14 @@
 
 | Task | Status |
 |------|--------|
-| TTFT measurement | ✅ Done — timer starts on proxy forward, stops on first token |
-| Token counting | ✅ Done — input/output tokens from API response |
+| TTFT measurement | ✅ Done — timer starts on proxy forward, stops on first token, displayed in seconds |
+| Token counting | ✅ Done — input/output tokens from API response + estimated fallback (~4 chars/token) |
 | Throughput calc | ✅ Done — tokens/sec from timing data |
 | Telemetry storage | ✅ Done — SQLite table for request logs |
 | Telemetry API | ✅ Done — `GET /api/telemetry` with model filtering |
-| Telemetry frontend | ✅ Done — request log table |
+| Telemetry frontend | ✅ Done — card-based layout with color-coded TTFT, formatted numbers |
+| Per-request tracking | ✅ Done — request tracker with lifecycle stages (queued → prefilling → generating → sending → completed) |
+| Real-time Monitor | ✅ Done — WebSocket push + polling fallback, request beams, token counter, idle waveform |
 
 ---
 
@@ -124,7 +126,7 @@ Everything below is post-launch. See `docs/todo.md` for the full checklist.
 - Crash detection, auto-restart with backoff, OOM detection, health-check loop
 
 ### V2: Polish & Hardening
-- launchd auto-start, graceful shutdown with state persistence, disk space management, telemetry charts, config export/import, WebSocket real-time updates
+- launchd auto-start, graceful shutdown with state persistence, disk space management, telemetry charts, config export/import
 
 ### V2: Frontend UX
 - Error boundaries, toast notifications, keyboard shortcuts, responsive layout, accessibility

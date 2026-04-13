@@ -1198,7 +1198,7 @@ async def anthropic_messages(request: dict):
                     if final_output_tokens and elapsed_sec and elapsed_sec > 0
                     else None
                 )
-                final_input_tokens = translator.input_tokens or None
+                final_input_tokens = translator.input_tokens or anthro_input_estimate
                 final_total_tokens = (final_input_tokens + final_output_tokens) if final_input_tokens and final_output_tokens else None
                 complete_request(track_id,
                     output_tokens=final_output_tokens or 0,
@@ -1270,8 +1270,9 @@ async def anthropic_messages(request: dict):
 
     end_time = time.monotonic()
     usage = result.get("usage", {})
-    input_tokens = usage.get("prompt_tokens")
+    input_tokens = usage.get("prompt_tokens") or anthro_input_estimate
     output_tokens = usage.get("completion_tokens")
+    total_tokens = usage.get("total_tokens") or ((input_tokens + output_tokens) if input_tokens and output_tokens else None)
     tokens_per_sec = output_tokens / (end_time - start_time) if output_tokens and end_time > start_time else None
 
     complete_request(track_id,
@@ -1285,7 +1286,7 @@ async def anthropic_messages(request: dict):
         ttft_ms=(end_time - start_time) * 1000,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
-        total_tokens=usage.get("total_tokens"),
+        total_tokens=total_tokens,
         tokens_per_sec=tokens_per_sec,
     )
     return JSONResponse(
@@ -1294,16 +1295,19 @@ async def anthropic_messages(request: dict):
     )
 
 
-def _estimate_input_tokens(request: dict) -> int | None:
-    """Estimate input token count from the request messages.
+def _estimate_input_tokens(request_or_messages) -> int | None:
+    """Estimate input token count from the request or messages.
     Used as a fallback when the backend doesn't include usage.prompt_tokens in SSE chunks.
     Rough estimate: ~4 chars per token for English text."""
-    messages = request.get("messages", [])
+    if isinstance(request_or_messages, dict):
+        messages = request_or_messages.get("messages", [])
+        system = request_or_messages.get("system")
+    else:
+        messages = request_or_messages
+        system = None
     if not messages:
         return None
     total_chars = sum(len(m.get("content", "")) for m in messages if isinstance(m.get("content"), str))
-    # Also count system prompt
-    system = request.get("system")
     if isinstance(system, str):
         total_chars += len(system)
     if total_chars == 0:

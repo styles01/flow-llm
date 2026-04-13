@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-type Illustration = 'models' | 'instances' | 'chat' | 'telemetry'
+type Illustration = 'models' | 'monitor' | 'chat' | 'telemetry'
 
 interface EmptyStateProps {
   title: string
@@ -19,12 +19,12 @@ const illustrations: Record<Illustration, ReactNode> = {
       <rect x="20" y="50" width="24" height="3" rx="1" opacity="0.2" />
     </svg>
   ),
-  instances: (
+  monitor: (
     <svg className="w-16 h-16" viewBox="0 0 64 64" fill="none" stroke="#2dd4bf" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      {/* Power symbol with flatline */}
-      <path d="M32 8v16" />
-      <path d="M20 16a20 20 0 1 0 24 0" />
-      <path d="M16 44h32" strokeWidth="1" opacity="0.3" />
+      {/* Oscilloscope screen with flatline */}
+      <rect x="4" y="8" width="56" height="40" rx="3" strokeWidth="1" opacity="0.3" />
+      <path d="M8 28h10l4-8 6 16 6-12h6l4 4h8" opacity="0.5" />
+      <line x1="4" y1="52" x2="60" y2="52" strokeWidth="1" opacity="0.2" />
     </svg>
   ),
   chat: (
