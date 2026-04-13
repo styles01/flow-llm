@@ -1736,10 +1736,16 @@ if WEB_DIST.exists():
 
 @app.get("/{full_path:path}")
 async def serve_frontend(full_path: str):
-    """Serve the React SPA for all non-API routes."""
+    """Serve static files from dist/ first, then fall back to React SPA."""
     if full_path.startswith(("api/", "v1/", "ws")):
         raise HTTPException(404)
 
+    # Serve actual static files (favicon.svg, icons.svg, etc.)
+    file_path = WEB_DIST / full_path
+    if file_path.is_file() and not full_path.startswith("assets/"):
+        return FileResponse(str(file_path))
+
+    # SPA fallback — serve index.html for client-side routing
     index_path = WEB_DIST / "index.html"
     if index_path.exists():
         return FileResponse(str(index_path))

@@ -16,3 +16,4 @@ server/logs/
 .vscode/
 .DS_Store
 .claude/
+logs/

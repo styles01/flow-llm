@@ -1,11 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- Dark background -->
+  <rect width="32" height="32" rx="4" fill="#0a0a0a"/>
   <!-- Center axis -->
   <line x1="1" y1="16" x2="31" y2="16" stroke="#5eead4" stroke-width="0.5" opacity="0.35"/>
   <!-- Grid lines (oscilloscope) -->
   <line x1="1" y1="8" x2="31" y2="8" stroke="#5eead4" stroke-width="0.2" opacity="0.1"/>
   <line x1="1" y1="24" x2="31" y2="24" stroke="#5eead4" stroke-width="0.2" opacity="0.1"/>
-  <!-- Teal waveform — upper half, mirrored below -->
+  <!-- Teal waveform — upper half -->
   <path d="M1 10 H4 V16 H8 V6 H12 V16 H16 V12 H20 V16 H24 V8 H28 V16 H31" fill="none" stroke="#2dd4bf" stroke-width="1.5" strokeMiterlimit="miter"/>
-  <!-- Magenta waveform — mirror of teal, reflected across y=16 -->
+  <!-- Magenta waveform — mirror reflected across y=16 -->
   <path d="M1 22 H4 V16 H8 V26 H12 V16 H16 V20 H20 V16 H24 V24 H28 V16 H31" fill="none" stroke="#e879f9" stroke-width="1.5" strokeMiterlimit="miter" opacity="0.8"/>
 </svg>
