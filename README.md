@@ -15,7 +15,7 @@ Run GGUF and MLX models locally. Proxy OpenAI & Anthropic API requests. Real-tim
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Platform: Apple Silicon](https://img.shields.io/badge/platform-Apple%20Silicon-orange.svg)](https://support.apple.com/en-us/HT211814)
-[![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-support-yellow?logo=buy-me-a-coffee&logoColor=white)](https://buymeacoffee.com/jamesaita)
+[![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-support-yellow?logo=buy-me-a-coffee&logoColor=white)](https://buymeacoffee.com/aitamedia)
 
 [Install](#quick-install) · [Features](#features) · [Quick Start](#quick-start) · [API](#api-endpoints) · [Architecture](docs/architecture.md)
 
