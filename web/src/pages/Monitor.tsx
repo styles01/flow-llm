@@ -21,7 +21,9 @@ function RequestPipeline({
 }) {
   const monitor = useMonitor()
   const requests = monitor.requests[modelId] || []
-  const slots = monitor.slots[modelId] || activity?.slots || []
+  // Prefer polling data for slots (WebSocket slot_update not broadcast by server yet)
+  const wsSlots = monitor.slots[modelId]
+  const slots = (wsSlots && wsSlots.length > 0) ? wsSlots : (activity?.slots || [])
   const metrics = monitor.metrics[modelId] || {
     slots_processing: activity?.slots_processing ?? null,
     slots_deferred: activity?.slots_deferred ?? null,
@@ -45,17 +47,21 @@ function RequestPipeline({
       {/* Active request beams */}
       {activeRequests.map((req) => {
         // Find matching slot for prefill progress
+        // Match slot to request: prefill slot goes with the first non-generating request,
+        // or if the request is already in prefilling stage
         const matchingSlot = slots.find(s =>
-          s.state === 'prefill' && req.stage === 'prefilling'
+          s.state === 'prefill' && (req.stage === 'prefilling' || req.stage === 'queued')
         )
-        // Queue position: 1-based index among queued requests
-        const queuedIndex = req.stage === 'queued'
+        // If we have a prefill slot for a queued request, show it as prefilling
+        const effectiveStage = (matchingSlot && req.stage === 'queued') ? 'prefilling' as const : req.stage
+        // Queue position: 1-based index among queued requests (without prefill slot)
+        const queuedIndex = req.stage === 'queued' && !matchingSlot
           ? activeRequests.filter(r => r.stage === 'queued').indexOf(req) + 1
           : undefined
         return (
           <RequestBeam
             key={req.request_id}
-            request={req}
+            request={{ ...req, stage: effectiveStage }}
             prefillProgress={matchingSlot?.progress}
             queuePosition={queuedIndex}
           />

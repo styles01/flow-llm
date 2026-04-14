@@ -43,11 +43,33 @@ def _update_slot(model_id: str, slot_id: int, **kwargs):
     if slot_id not in _slot_states[model_id]:
         _slot_states[model_id][slot_id] = {"state": "idle", "progress": 0.0, "task_id": None}
     _slot_states[model_id][slot_id].update(kwargs)
+    # Broadcast slot update via WebSocket
+    try:
+        from flow_llm.main import broadcast
+        slot_data = {"model_id": model_id, "slot_id": slot_id, **kwargs}
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(broadcast("slot_update", slot_data))
+        except RuntimeError:
+            pass
+    except ImportError:
+        pass
 
 
 def _clear_slot(model_id: str, slot_id: int):
     if model_id in _slot_states:
         _slot_states[model_id].pop(slot_id, None)
+    # Broadcast slot cleared (idle) via WebSocket
+    try:
+        from flow_llm.main import broadcast
+        slot_data = {"model_id": model_id, "slot_id": slot_id, "state": "idle", "progress": 0}
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(broadcast("slot_update", slot_data))
+        except RuntimeError:
+            pass
+    except ImportError:
+        pass
 
 
 # Log buffer for backend processes (rotating buffer, max 2000 lines per model)
