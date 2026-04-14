@@ -154,7 +154,7 @@ export default function MonitorPage() {
           )}
         </div>
         <button
-          onClick={() => refetch()}
+          onClick={() => { refetch(); monitorActions.clear(); }}
           className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-sm"
         >
           Refresh

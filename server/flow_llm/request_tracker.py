@@ -209,13 +209,19 @@ def prune_completed():
         prune_request(rid)
 
 
-def clear_stuck(max_age_seconds: float = 120):
-    """Remove requests stuck in queued/generating/prefilling/sending for too long."""
+def clear_stuck(max_age_seconds: float = 600):
+    """Remove requests stuck in queued/generating/prefilling/sending for too long.
+    Called automatically from /api/requests endpoint and manually from POST /api/requests/clear-stuck.
+
+    Default 600s (10 min) to accommodate long prefill/generation from agents like
+    OpenClaw/Hermes which can take 3+ minutes on large models."""
     now = time.monotonic()
     to_prune = []
     for rid, req in _active_requests.items():
         if req.stage in ("queued", "prefilling", "generating", "sending"):
-            if now - req.started_at > max_age_seconds:
+            # queued/sending should resolve quickly (2 min), generating/prefilling can be very long
+            age_limit = 120 if req.stage in ("queued", "sending") else max_age_seconds
+            if now - req.started_at > age_limit:
                 to_prune.append(rid)
     for rid in to_prune:
         req = _active_requests.get(rid)
