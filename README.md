@@ -1,8 +1,43 @@
-# Flow LLM — macOS LLM Orchestration
+<div align="center">
 
-An alternative to Ollama and LM Studio for running local models with AI coding agents. Flow is a local LLM gateway for Apple Silicon that manages GGUF and MLX models, proxies OpenAI- and Anthropic-compatible API requests, and exposes real-time telemetry — so tools like OpenClaw, [Hermes](https://github.com/nousresearch/hermes-agent), Claude Code, and Codex (via [AIRun](https://github.com/andisearch/airun)) can talk to local models without Ollama or LM Studio.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="web/public/favicon.svg">
+  <source media="(prefers-color-scheme: light)" srcset="web/public/favicon.svg">
+  <img alt="Flow LLM" width="140" src="web/public/favicon.svg">
+</picture>
 
-![Flow LLM](screenshots/flow-llm-monitor-page.png)
+# Flow LLM
+
+**Local LLM gateway for Apple Silicon**
+
+Run GGUF and MLX models locally. Proxy OpenAI & Anthropic API requests. Real-time monitoring. Built for coding agents.
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Platform: Apple Silicon](https://img.shields.io/badge/platform-Apple%20Silicon-orange.svg)](https://support.apple.com/en-us/HT211814)
+[![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-support-yellow?logo=buy-me-a-coffee&logoColor=white)](https://buymeacoffee.com/jamesaita)
+
+[Install](#quick-install) · [Features](#features) · [Quick Start](#quick-start) · [API](#api-endpoints) · [Architecture](docs/architecture.md)
+
+</div>
+
+---
+
+Flow LLM is a local LLM gateway for macOS. It manages GGUF and MLX models on Apple Silicon, proxies OpenAI- and Anthropic-compatible API requests, and exposes real-time monitoring — so tools like **OpenClaw**, **[Hermes](https://github.com/nousresearch/hermes-agent)**, **Claude Code**, and **Codex** (via [AIRun](https://github.com/andisearch/airun)) can talk to local models without Ollama or LM Studio.
+
+![Flow LLM Monitor](screenshots/flow-llm-monitor-page.png)
+
+## Features
+
+- **Real-time Monitor** — Per-request lifecycle tracking (queued → prefilling → generating → completed), odometer-style token counter, WebSocket push, idle waveform
+- **OpenAI & Anthropic APIs** — Drop-in proxy for `/v1/chat/completions` and `/v1/messages`. Streaming and non-streaming, tool calling, system prompts
+- **GGUF & MLX** — Run llama.cpp GGUF models or MLX models on Apple Silicon with sensible defaults (100K context, flash attention, q4_0 KV cache)
+- **Agent-Ready** — Parallel slot support, Anthropic streaming SSE adapter, input token estimation fallback, stuck request pruning
+- **Connect External** — Adopt an already-running llama-server without restarting it. Auto-detects model name
+- **HuggingFace Browser** — Search and download models directly from the UI. Scan local directories for unregistered GGUF files
+- **Telemetry** — TTFT, throughput, token counts per request. Card-based history with color-coded metrics
+- **Template Validation** — Validates chat templates before loading (Jinja syntax, system role, tool calling)
+- **Single Binary** — `pip install -e . && flow`. One process, one port (3377). Frontend bundled in the package
 
 ## Quick Install
 
@@ -10,32 +45,7 @@ An alternative to Ollama and LM Studio for running local models with AI coding a
 curl -fsSL https://raw.githubusercontent.com/styles01/flow-llm/main/setup.sh | bash
 ```
 
-Or clone and run manually:
-
-```bash
-git clone https://github.com/styles01/flow-llm.git
-cd flow-llm && ./setup.sh
-```
-
-## Prerequisites
-
-Flow LLM requires **inference backends** to run models. Install at least one:
-
-### llama.cpp (required for GGUF models)
-
-```bash
-brew install llama.cpp
-```
-
-### mlx-openai-server (optional, for MLX models)
-
-```bash
-pip install mlx-openai-server
-```
-
-## Quick Start
-
-### 1. Install and run
+Or clone and run:
 
 ```bash
 git clone https://github.com/styles01/flow-llm.git
@@ -43,17 +53,33 @@ cd flow-llm && ./setup.sh
 flow
 ```
 
-Open **http://localhost:3377** — everything (API + UI) is served from a single process.
+Open **http://localhost:3377** — API and UI from a single process.
 
-### 2. Connect a model
+## Prerequisites
 
-If you already have a llama-server running:
+Flow requires **inference backends**. Install at least one:
 
-1. Open Flow UI → **Models** → **Connect Running Model**
-2. Enter the URL (e.g. `http://127.0.0.1:8081`)
-3. Click **Connect** — Flow auto-detects the model name
+```bash
+# Required — GGUF models
+brew install llama.cpp
 
-Or register a local GGUF file and load through Flow:
+# Optional — MLX models
+pip install mlx-openai-server
+```
+
+## Quick Start
+
+### 1. Start Flow
+
+```bash
+flow
+```
+
+### 2. Load a model
+
+In the UI: **Models** → search HuggingFace, or **Connect Running Model** if you already have a llama-server.
+
+Or via API:
 
 ```bash
 curl -X POST http://localhost:3377/api/register-local \
@@ -61,11 +87,7 @@ curl -X POST http://localhost:3377/api/register-local \
   -d '{"gguf_path": "/path/to/model.gguf"}'
 ```
 
-Then load it in the UI with your preferred settings (100K context, flash attention, q4_0 KV cache).
-
-### 3. Configure your coding tool
-
-Point OpenClaw, [Hermes](https://github.com/nousresearch/hermes-agent), Claude Code, or Codex (via [AIRun](https://github.com/andisearch/airun)) to Flow:
+### 3. Point your agent
 
 ```json
 {
@@ -81,23 +103,34 @@ Point OpenClaw, [Hermes](https://github.com/nousresearch/hermes-agent), Claude C
 }
 ```
 
-Flow also exposes an Anthropic-compatible endpoint at `POST /v1/messages` for Claude Code and other tools that use the Anthropic Messages API.
+Flow also exposes `POST /v1/messages` for Claude Code and other Anthropic API tools.
+
+## Model Loading Defaults
+
+Flow ships with sensible defaults for Apple Silicon:
+
+| Setting | Default | Why |
+|---------|---------|-----|
+| Context window | 100,000 tokens | Coding agents need long context |
+| Flash attention | On | Critical for long context performance |
+| KV cache | q4_0 | 75% memory savings, enables 100K on 48GB |
+| GPU layers | -1 (all) | Metal acceleration |
+| Parallel slots | 2 | Concurrent agent requests |
+| Auto-update | On | Checks backend versions on startup |
+
+Configurable in Settings page, persisted to `~/.flow/settings.json`.
 
 ## Development
-
-For contributors who want to work on the frontend with hot reload:
 
 ```bash
 cd server && pip install -e .
 cd ../web && npm install && npm run dev
 ```
 
-Frontend dev server runs at **http://localhost:5173** and proxies API requests to the backend.
-
-To rebuild the bundled frontend after changes:
+Frontend dev server at **http://localhost:5173** proxies API requests to the backend. Rebuild bundled frontend:
 
 ```bash
-./build_frontend.sh
+cd web && npm run build
 ```
 
 ## Dependencies
@@ -130,40 +163,17 @@ To rebuild the bundled frontend after changes:
 |-----------|---------|---------|
 | mlx-openai-server | MLX inference backend | `pip install mlx-openai-server` |
 
-## Architecture
+## Connect External Backend
 
-See [docs/architecture.md](docs/architecture.md) for the full design.
+Flow can adopt an already-running backend without restarting it:
 
-## Key Files
+```bash
+curl -X POST http://localhost:3377/api/connect-external \
+  -H "Content-Type: application/json" \
+  -d '{"base_url": "http://127.0.0.1:8081"}'
+```
 
-| File | Purpose |
-|------|---------|
-| `server/flow_llm/main.py` | FastAPI app with all API routes |
-| `server/flow_llm/process_manager.py` | Starts/stops llama.cpp and mlx-openai-server; also manages external processes |
-| `server/flow_llm/hf_client.py` | HuggingFace search and download |
-| `server/flow_llm/template_validator.py` | Validates chat templates before loading |
-| `server/flow_llm/database.py` | SQLite model registry |
-| `server/flow_llm/hardware.py` | Apple Silicon detection |
-| `server/flow_llm/config.py` | Default and persisted settings (port 3377, load defaults, auto-update toggle) |
-| `server/flow_llm/updater.py` | Backend version detection and update helpers for llama.cpp and mlx-openai-server |
-| `web/src/pages/Models.tsx` | Model management with HF search, local registration, connect external |
-| `web/src/pages/Chat.tsx` | Chat test with system prompt editor, streaming SSE, tool calling |
-| `web/src/pages/Monitor.tsx` | Real-time model monitoring with request tracking |
-| `web/src/pages/Logs.tsx` | Backend log viewer with per-model filtering |
-| `web/src/pages/Settings.tsx` | Persisted load defaults, backend versions, update controls, hardware info |
-| `web/src/pages/Telemetry.tsx` | Request log table |
-| `web/src/components/LoadDialog.tsx` | Model loading controls (context, parallel slots, flash attention, KV cache) |
-| `web/src/api/client.ts` | API client for frontend |
-
-## Development
-
-| File | Purpose |
-|------|---------|
-| `start.sh` | Start backend + frontend |
-
-## License
-
-[MIT](LICENSE)
+Auto-detects the model name. Unloading kills the backend process and frees memory.
 
 ## Port Layout
 
@@ -180,66 +190,42 @@ See [docs/architecture.md](docs/architecture.md) for the full design.
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| GET | `/api/hardware` | Hardware info (chip, memory, Metal support) |
+| GET | `/api/hardware` | Hardware info (chip, memory, Metal) |
 | GET | `/api/models` | List all registered models |
 | GET | `/api/models/{id}` | Get model details |
-| GET | `/api/models/running` | List running models with live status |
-| POST | `/api/models/{id}/load` | Load a model (start backend process) |
-| POST | `/api/models/{id}/unload` | Unload a model (stop backend process) |
-| DELETE | `/api/models/{id}` | Delete a model from disk and registry |
+| GET | `/api/models/running` | List running models |
+| POST | `/api/models/{id}/load` | Load a model |
+| POST | `/api/models/{id}/unload` | Unload a model |
+| DELETE | `/api/models/{id}` | Delete a model |
 | POST | `/api/models/download` | Download from HuggingFace |
-| POST | `/api/models/scan` | Scan local files for unregistered GGUF |
-| POST | `/api/register-local` | Register an existing GGUF file |
-| POST | `/api/connect-external` | Connect to an already-running backend |
-| GET | `/api/settings` | Get default model loading settings |
-| PUT | `/api/settings` | Update default settings |
-| GET | `/api/downloads` | Get active/recent download progress |
-| GET | `/api/hf/search?q=` | Search HuggingFace models |
-| GET | `/api/hf/model/{id}` | Get HuggingFace model details |
-| GET | `/api/telemetry` | Get telemetry records |
-| GET | `/api/backend-versions` | Get installed/latest backend versions |
-| POST | `/api/check-updates` | Trigger backend version check |
-| POST | `/api/update-backend/{backend}` | Trigger backend update |
-| GET | `/api/processing-progress` | Get prefill progress for active models |
-| GET | `/api/logs` | Get recent backend logs |
-| GET | `/api/model-activity` | Get live per-slot activity and llama.cpp metrics |
+| POST | `/api/models/scan` | Scan for unregistered GGUF files |
+| POST | `/api/register-local` | Register a local GGUF file |
+| POST | `/api/connect-external` | Connect to a running backend |
+| GET | `/api/settings` | Get default loading settings |
+| PUT | `/api/settings` | Update settings |
+| GET | `/api/downloads` | Download progress |
+| GET | `/api/hf/search?q=` | Search HuggingFace |
+| GET | `/api/telemetry` | Request telemetry records |
+| GET | `/api/requests` | Active request tracker |
+| POST | `/api/requests/clear-stuck` | Clear stuck requests |
+| GET | `/api/logs` | Backend logs |
+| GET | `/api/model-activity` | Per-slot activity and metrics |
 | GET | `/api/health` | Health check |
 
 ### OpenAI-Compatible Proxy
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| POST | `/v1/chat/completions` | Route to backend by model name (streaming + non-streaming) |
-| POST | `/v1/messages` | Anthropic-compatible Messages API (for Claude Code / AI-run) |
+| POST | `/v1/chat/completions` | Chat completions (streaming + non-streaming) |
+| POST | `/v1/messages` | Anthropic Messages API |
 | GET | `/v1/models` | List available models |
 
 ### WebSocket
 
 | Endpoint | Purpose |
 |----------|---------|
-| `/ws` | Real-time lifecycle events (`model_loaded`, `model_unloaded`, `model_downloaded`, `model_deleted`) |
+| `/ws` | Real-time updates (request lifecycle, slot state, metrics, model events) |
 
-## Connect External Backend
+## License
 
-Flow can connect to an already-running backend (like a manually-started llama-server) without restarting it:
-
-```bash
-curl -X POST http://localhost:3377/api/connect-external \
-  -H "Content-Type: application/json" \
-  -d '{"base_url": "http://127.0.0.1:8081"}'
-```
-
-This auto-detects the model name from the backend and registers it as running. The proxy will route requests to it. Unloading an external model kills the backend process and frees memory.
-
-## Model Loading Defaults
-
-Flow ships with sensible defaults for Apple Silicon:
-
-- **Context window**: 100,000 tokens (OpenClaw needs large context)
-- **Flash attention**: On (critical for long context)
-- **KV cache**: q4_0 quantization (75% memory savings, enables 100K context on 48GB)
-- **GPU layers**: -1 (all layers on Metal)
-- **Parallel slots**: 2 (for concurrent agent requests)
-- **Auto-update backends**: On (checks versions on startup and can auto-upgrade supported installs)
-
-These can be changed in the Settings page, are used as defaults in the Load dialog and Chat page, and are persisted to `~/.flow/settings.json`.
+[MIT](LICENSE)

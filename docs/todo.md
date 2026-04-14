@@ -145,13 +145,23 @@ Prioritized implementation checklist.
 - [ ] Reasoning mode test (Gemma 4 `<|think|>` tags)
 
 ### Polish & Hardening
-- [ ] macOS launchd auto-start plist
+- [ ] macOS menu bar app (PyObjC, start/stop/monitor server, auto-restart on crash, in-app auto-update)
+- [ ] macOS .app bundle (auto-install to /Applications, launchd auto-start plist)
 - [ ] Graceful shutdown with runtime state persistence (which models were loaded, params)
 - [ ] Disk space management (show usage, warn at 80%)
 - [ ] Telemetry charts (TTFT over time, throughput comparison, model comparison)
-- [ ] Config export/import (share between machines)
-- [ ] Replace polling with WebSocket for model/download status updates
+- [ ] Config export/import (share settings between machines)
 - [ ] Full UX design review (visual hierarchy, type scale, interaction patterns)
+
+### Feature Parity (oMLX comparison)
+- [ ] One-click agent config (OpenClaw, Claude Code, Codex setup from dashboard)
+- [ ] Built-in performance benchmark (one-click PP/TG tok/s measurement, prefix cache testing)
+- [ ] HuggingFace model downloader in dashboard UI (search, browse, one-click download)
+- [ ] Vision-language model support (multi-image chat, base64/URL/file inputs)
+- [ ] Continuous batching / parallel request queuing visualization
+- [ ] Claude Code context scaling (scale reported token counts for auto-compact timing)
+- [ ] Per-model settings in dashboard (sampling params, chat template kwargs, TTL, model alias)
+- [ ] Built-in chat with conversation history and model switching
 
 ### Frontend UX
 - [ ] React error boundaries on all pages

@@ -95,7 +95,7 @@
 
 ---
 
-## Phase 5: GitHub Readiness (In Progress)
+## Phase 5: GitHub Readiness ✅
 
 **Goal:** Clean, installable, public-ready repo.
 
@@ -126,7 +126,18 @@ Everything below is post-launch. See `docs/todo.md` for the full checklist.
 - Crash detection, auto-restart with backoff, OOM detection, health-check loop
 
 ### V2: Polish & Hardening
-- launchd auto-start, graceful shutdown with state persistence, disk space management, telemetry charts, config export/import
+- macOS menu bar app (PyObjC), .app bundle, launchd auto-start
+- Graceful shutdown with state persistence, disk space management
+- Telemetry charts, config export/import
+
+### V2: Feature Parity (oMLX-inspired)
+- One-click agent config (OpenClaw, Claude Code, Codex from dashboard)
+- Built-in performance benchmark (PP/TG tok/s, prefix cache testing)
+- HuggingFace model downloader in dashboard UI
+- Vision-language model support
+- Per-model settings (sampling params, chat template kwargs, TTL, alias)
+- Built-in chat with conversation history and model switching
+- Claude Code context scaling for smaller-context models
 
 ### V2: Frontend UX
 - Error boundaries, toast notifications, keyboard shortcuts, responsive layout, accessibility
