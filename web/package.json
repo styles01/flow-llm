@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build && cp -r dist/* ../server/flow_llm/frontend/",
+    "build": "tsc -b && vite build && rm -rf ../server/flow_llm/frontend/* && cp -r dist/* ../server/flow_llm/frontend/",
     "lint": "eslint .",
     "preview": "vite preview"
   },

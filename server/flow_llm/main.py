@@ -1106,7 +1106,7 @@ async def anthropic_messages(request: dict):
     backend_url = proc.base_url
 
     if openai_request.get("stream", False):
-        client = httpx.AsyncClient(timeout=300.0)
+        client = httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=600.0, write=30.0, pool=30.0))
         try:
             backend_request = client.build_request(
                 "POST",
@@ -1223,7 +1223,7 @@ async def anthropic_messages(request: dict):
         )
 
     try:
-        async with httpx.AsyncClient(timeout=300.0) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=600.0, write=30.0, pool=30.0)) as client:
             response = await client.post(
                 f"{backend_url}/v1/chat/completions",
                 json=openai_request,
@@ -1357,7 +1357,7 @@ async def chat_completions(request: dict):
             total_output_tokens = 0
             input_tokens = None
             output_tokens_from_usage = None
-            client = httpx.AsyncClient(timeout=300.0)
+            client = httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=600.0, write=30.0, pool=30.0))
             try:
                 async with client.stream(
                     "POST",
@@ -1428,9 +1428,9 @@ async def chat_completions(request: dict):
             media_type="text/event-stream",
         )
     else:
-        # Non-streaming response
+        # Non-streaming response — use long timeout for deep thinking/reasoning
         try:
-            async with httpx.AsyncClient(timeout=300.0) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=600.0, write=30.0, pool=30.0)) as client:
                 response = await client.post(
                     f"{backend_url}/v1/chat/completions",
                     json=request,
@@ -1466,9 +1466,18 @@ async def chat_completions(request: dict):
                 )
 
                 return result
+        except httpx.ReadTimeout:
+            error_request(track_id, "Backend timed out — request took longer than 600s")
+            return JSONResponse(
+                status_code=504,
+                content={"error": {"message": "Backend timed out", "type": "timeout_error"}},
+            )
         except Exception as exc:
             error_request(track_id, str(exc))
-            raise
+            return JSONResponse(
+                status_code=502,
+                content={"error": {"message": f"Proxy error: {str(exc)}", "type": "proxy_error"}},
+            )
 
 
 @app.get("/v1/models")
