@@ -7,10 +7,13 @@ via WebSocket for real-time Monitor page display.
 
 import asyncio
 import json
+import logging
 import time
 import uuid
 from dataclasses import dataclass, field, asdict
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -47,9 +50,6 @@ def _req_to_dict(req: ActiveRequest) -> dict:
 
 def _schedule_broadcast(request: ActiveRequest):
     """Schedule a WebSocket broadcast, throttled per model."""
-    import logging
-    logger = logging.getLogger(__name__)
-
     now = time.monotonic()
     model_id = request.model_id
 
@@ -207,6 +207,22 @@ def prune_completed():
             to_prune.append(rid)
     for rid in to_prune:
         prune_request(rid)
+
+
+def clear_stuck(max_age_seconds: float = 120):
+    """Remove requests stuck in queued/generating/prefilling/sending for too long."""
+    now = time.monotonic()
+    to_prune = []
+    for rid, req in _active_requests.items():
+        if req.stage in ("queued", "prefilling", "generating", "sending"):
+            if now - req.started_at > max_age_seconds:
+                to_prune.append(rid)
+    for rid in to_prune:
+        req = _active_requests.get(rid)
+        if req:
+            logger.info(f"Pruning stuck request {rid} (stage={req.stage}, age={now - req.started_at:.0f}s)")
+        prune_request(rid)
+    return len(to_prune)
 
 
 def get_requests_for_model(model_id: str) -> list[dict]:

@@ -1722,9 +1722,18 @@ async def model_activity():
 @app.get("/api/requests")
 async def get_requests():
     """Get all active tracked requests (polling fallback for WebSocket)."""
-    from flow_llm.request_tracker import get_all_active, prune_completed
+    from flow_llm.request_tracker import get_all_active, prune_completed, clear_stuck
     prune_completed()
+    clear_stuck()
     return {"requests": get_all_active()}
+
+
+@app.post("/api/requests/clear-stuck")
+async def api_clear_stuck(max_age: int = 120):
+    """Clear requests stuck in queued/generating/prefilling/sending for too long."""
+    from flow_llm.request_tracker import clear_stuck
+    count = clear_stuck(max_age_seconds=max_age)
+    return {"cleared": count}
 
 
 # --- Serve frontend ---
