@@ -215,6 +215,19 @@ async def lifespan(app: FastAPI):
     from flow_llm.updater import check_and_autoupdate
     asyncio.create_task(check_and_autoupdate(auto_update=settings.auto_update_backends))
 
+    # Periodically prune stuck requests (every 60s)
+    async def _prune_stuck_requests():
+        from flow_llm.request_tracker import clear_stuck
+        while True:
+            await asyncio.sleep(60)
+            try:
+                cleared = clear_stuck()
+                if cleared:
+                    logger.info(f"Auto-pruned {cleared} stuck request(s)")
+            except Exception:
+                pass
+    asyncio.create_task(_prune_stuck_requests())
+
     logger.info("Flow LLM started — data dir: %s", settings.data_dir)
 
     yield
@@ -1186,6 +1199,16 @@ async def anthropic_messages(request: dict):
                     if event.startswith("event: error"):
                         stream_error_message = "Anthropic stream translation failed."
                     yield event
+            except httpx.ReadTimeout:
+                stream_error_message = "Backend timed out — request took longer than 600s"
+                error_request(track_id, stream_error_message)
+                yield _anthropic_stream_error_event("api_error", stream_error_message)
+                return
+            except Exception as exc:
+                stream_error_message = str(exc)
+                error_request(track_id, stream_error_message)
+                yield _anthropic_stream_error_event("api_error", f"Stream error: {stream_error_message}")
+                return
             finally:
                 await response.aclose()
                 await client.aclose()
@@ -1358,6 +1381,7 @@ async def chat_completions(request: dict):
             input_tokens = None
             output_tokens_from_usage = None
             client = httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=600.0, write=30.0, pool=30.0))
+            stream_error = None
             try:
                 async with client.stream(
                     "POST",
@@ -1398,8 +1422,16 @@ async def chat_completions(request: dict):
                             yield "\n"
                         else:
                             yield line + "\n"
+            except httpx.ReadTimeout:
+                stream_error = "Backend timed out — request took longer than 600s"
+                error_request(track_id, stream_error)
+            except Exception as exc:
+                stream_error = str(exc)
+                error_request(track_id, stream_error)
             finally:
                 await client.aclose()
+            if stream_error:
+                return
             end_time = time.monotonic()
             ttft_ms = (first_token_time - start_time) * 1000 if first_token_time else None
             elapsed_sec = (end_time - start_time) if first_token_time else None

@@ -48,12 +48,16 @@ function RequestPipeline({
         const matchingSlot = slots.find(s =>
           s.state === 'prefill' && req.stage === 'prefilling'
         )
+        // Queue position: 1-based index among queued requests
+        const queuedIndex = req.stage === 'queued'
+          ? activeRequests.filter(r => r.stage === 'queued').indexOf(req) + 1
+          : undefined
         return (
           <RequestBeam
             key={req.request_id}
             request={req}
             prefillProgress={matchingSlot?.progress}
-            queuePosition={req.stage === 'queued' ? queuedCount : undefined}
+            queuePosition={queuedIndex}
           />
         )
       })}
