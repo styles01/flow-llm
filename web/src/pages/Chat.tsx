@@ -187,6 +187,7 @@ export default function ChatPage() {
   const { messages, selectedModel, systemPrompt, includeTools, streaming, lastTelemetry, processingProgress } = session
   const [userMessage, setUserMessage] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [maxTokens, setMaxTokens] = useState(8192)
 
   const { data: models = [] } = useQuery({
     queryKey: ['models'],
@@ -276,7 +277,7 @@ export default function ChatPage() {
           model: selectedModel,
           messages: newMessages.map(m => ({ role: m.role, content: m.content })),
           ...(tools ? { tools, tool_choice: 'auto' } : {}),
-          max_tokens: 8192,
+          max_tokens: maxTokens,
           stream: true,
         }),
       })
@@ -492,7 +493,7 @@ export default function ChatPage() {
       {/* Input area */}
       <div className="shrink-0 border-t border-gray-800 bg-gray-950 px-4 py-3">
         <div className="max-w-3xl mx-auto">
-          {/* System prompt (collapsible) */}
+          {/* System prompt + max tokens (collapsible) */}
           <details className="mb-2">
             <summary className="cursor-pointer text-xs text-gray-500 hover:text-gray-400 transition-colors select-none flex items-center gap-1">
               <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
@@ -500,12 +501,30 @@ export default function ChatPage() {
               {systemPrompt && systemPrompt !== 'You are a helpful assistant.' && (
                 <span className="text-gray-600 ml-1">— {systemPrompt.slice(0, 50)}{systemPrompt.length > 50 ? '...' : ''}</span>
               )}
+              <span className="ml-auto text-gray-600 font-mono">{maxTokens.toLocaleString()} max tokens</span>
             </summary>
             <textarea
               value={systemPrompt}
               onChange={(e) => chatActions.setSystemPrompt(e.target.value)}
               className="w-full mt-1 px-3 py-2 bg-gray-900 border border-gray-700 rounded-md text-white font-mono text-xs h-20 resize-y focus:outline-none focus:ring-2 focus:ring-teal-500"
             />
+            <div className="flex items-center gap-2 mt-2">
+              <label className="text-xs text-gray-500 shrink-0">Max tokens</label>
+              <input
+                type="number"
+                value={maxTokens}
+                onChange={(e) => setMaxTokens(Math.max(1, Number(e.target.value)))}
+                className="w-28 px-2 py-1 bg-gray-900 border border-gray-700 rounded text-white text-xs font-mono focus:outline-none focus:ring-2 focus:ring-teal-500"
+              />
+              <div className="flex gap-1">
+                {[1024, 4096, 8192, 16384, 32768].map(n => (
+                  <button key={n} onClick={() => setMaxTokens(n)}
+                    className={`px-2 py-0.5 rounded text-xs font-mono transition-colors ${maxTokens === n ? 'bg-teal-700 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
+                    {n >= 1024 ? `${n/1024}K` : n}
+                  </button>
+                ))}
+              </div>
+            </div>
           </details>
 
           {/* Message input */}
