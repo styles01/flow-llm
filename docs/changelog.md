@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-04-19 (continued)
+
+### Chat Inference Controls + Bug Fixes
+
+- **Added `max_tokens` control to Chat** — exposed as a UI field in the system prompt collapsible with quick-select buttons (1K / 4K / 8K / 16K / 32K) and a free-form input. Current value shown in collapsed summary. Defaults to 8,192.
+- **Fixed Chat swallowing Qwen3.6 responses** — `max_tokens` was hardcoded to 500. Qwen3.6 spends 1,000–5,000 tokens on `<think>` blocks before producing any answer, so responses were silently truncated during thinking.
+- **Fixed TTFT tracking for thinking models** — proxy only triggered first-token time on `delta.content`; Qwen3.6 emits all early tokens as `delta.reasoning_content`. TTFT now fires on either field.
+
+### Files Modified (2026-04-19 continued)
+- `web/src/pages/Chat.tsx` — max_tokens state + UI field with quickselect, wired to request body
+- `server/flow_llm/main.py` — TTFT detection on `reasoning_content` as well as `content`
+
+---
+
 ## 2026-04-19
 
 ### Qwen3.6 Thinking Mode + MLX Presets

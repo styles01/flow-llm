@@ -117,6 +117,21 @@ Prioritized implementation checklist.
 
 ## V2 Roadmap
 
+### 🔴 Critical — Blocking Real Use
+
+- [ ] **Sampling params in Chat** — expose `temperature`, `top_p`, `top_k`, `presence_penalty` in Chat UI (same collapsible as max_tokens); currently only max_tokens is sent
+- [ ] **Per-model runtime config** — `_model_configs` in-memory dict, GET/PUT/DELETE endpoints, proxy injection of `chat_template_kwargs` (preserve_thinking, enable_thinking) and sampling defaults — see `docs/model-config-plan.md`
+- [ ] **Backend crash detection** — periodic health ping from server to loaded backends; mark model as "error" on failure; frontend notification
+- [ ] **HuggingFace API token config** — Settings UI field + persisted to `settings.json`; required for gated models (Llama, Mistral, etc.)
+
+### 🟠 High Impact — Power User Workflow
+
+- [ ] **Conversation persistence** — save chat history to SQLite; Conversations page with rename/delete/export
+- [ ] **Model aliasing** — editable friendly name per model; shown in Chat/Monitor dropdowns instead of raw filenames
+- [ ] **Telemetry charts** — TTFT trend line, throughput over time, model comparison heatmap (replace flat table)
+- [ ] **Built-in benchmarking** — one-click PP/TG tok/s measurement, prefill cache testing (oMLX parity)
+- [ ] **Disk space warnings** — check available space before download; warn at 80% full; show per-model disk usage
+
 ### Anthropic API Completeness
 - [ ] `/v1/messages/count_tokens` endpoint
 - [ ] Multimodal content blocks (image, document)
@@ -156,13 +171,13 @@ Prioritized implementation checklist.
 
 ### Feature Parity (oMLX comparison)
 - [ ] One-click agent config (OpenClaw, Claude Code, Codex setup from dashboard)
-- [ ] Built-in performance benchmark (one-click PP/TG tok/s measurement, prefix cache testing)
-- [ ] HuggingFace model downloader in dashboard UI (search, browse, one-click download)
-- [ ] Vision-language model support (multi-image chat, base64/URL/file inputs)
+- [ ] Built-in performance benchmark (one-click PP/TG tok/s measurement, prefix cache testing) — see 🟠 section
+- [ ] Vision-language model support (multi-image chat, base64/URL/file inputs in Chat)
 - [ ] Continuous batching / parallel request queuing visualization
 - [ ] Claude Code context scaling (scale reported token counts for auto-compact timing)
-- [ ] Per-model settings in dashboard (sampling params, chat template kwargs, TTL, model alias)
-- [ ] Built-in chat with conversation history and model switching
+- [ ] Per-model settings in dashboard (sampling params, chat template kwargs, TTL, model alias) — see 🔴 section
+- [ ] Built-in chat with conversation history and model switching — see 🟠 section
+- [ ] Model A/B testing — split-screen chat with same prompt sent to two models side-by-side
 
 ### Frontend UX
 - [ ] React error boundaries on all pages
@@ -193,9 +208,12 @@ Prioritized implementation checklist.
 - [ ] `settings.ensure_dirs()` called twice in lifespan (harmless but redundant)
 - [ ] WebSocket `/ws` endpoint exists but frontend doesn't use it (still polling)
 - [ ] MLX port range not auto-detected at startup (only GGUF ports scanned)
-- [ ] `HuggingFaceClient(token=None)` — no way to configure HF API token
+- [ ] `HuggingFaceClient(token=None)` — no way to configure HF API token (see 🔴 section)
 - [ ] No `models_dir` validation (accepts any path, even non-existent)
 - [ ] Non-streaming and streaming error parsing use inconsistent patterns
+- [ ] Chat `max_tokens` hardcoded (now 8192) — should come from per-model config or Settings default
+- [ ] TTFT not recorded for thinking models when no `content` delta arrives before context exhausted
+- [ ] Non-streaming proxy puts `<think>` in `content` not `reasoning_content` (streaming only splits correctly)
 
 ### Future
 - [ ] Multi-machine network routing
