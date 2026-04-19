@@ -276,7 +276,7 @@ export default function ChatPage() {
           model: selectedModel,
           messages: newMessages.map(m => ({ role: m.role, content: m.content })),
           ...(tools ? { tools, tool_choice: 'auto' } : {}),
-          max_tokens: 500,
+          max_tokens: 8192,
           stream: true,
         }),
       })

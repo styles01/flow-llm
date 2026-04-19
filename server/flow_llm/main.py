@@ -1453,8 +1453,9 @@ async def chat_completions(request: dict):
                                         input_tokens = usage["prompt_tokens"]
                                     if usage.get("completion_tokens"):
                                         output_tokens_from_usage = usage["completion_tokens"]
-                                # Track first token time from content deltas
-                                if chunk.get("choices") and chunk["choices"][0].get("delta", {}).get("content"):
+                                # Track first token time from content or reasoning_content deltas
+                                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                                if chunk.get("choices") and (delta.get("content") or delta.get("reasoning_content")):
                                     if first_token_time is None:
                                         first_token_time = time.monotonic()
                                         ttft = (first_token_time - start_time) * 1000
