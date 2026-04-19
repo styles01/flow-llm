@@ -119,8 +119,7 @@ Prioritized implementation checklist.
 
 ### 🔴 Critical — Blocking Real Use
 
-- [ ] **Sampling params in Chat** — expose `temperature`, `top_p`, `top_k`, `presence_penalty` in Chat UI (same collapsible as max_tokens); currently only max_tokens is sent
-- [ ] **Per-model runtime config** — `_model_configs` in-memory dict, GET/PUT/DELETE endpoints, proxy injection of `chat_template_kwargs` (preserve_thinking, enable_thinking) and sampling defaults — see `docs/model-config-plan.md`
+- [ ] **Per-model runtime config** — `_model_configs` in-memory dict, GET/PUT/DELETE endpoints, proxy injection of sampling defaults (`temperature`, `top_p`, `top_k`, `presence_penalty`) and `chat_template_kwargs` (`preserve_thinking`, `enable_thinking`); exposed on Monitor page per loaded model — see `docs/model-config-plan.md`
 - [ ] **Backend crash detection** — periodic health ping from server to loaded backends; mark model as "error" on failure; frontend notification
 - [ ] **HuggingFace API token config** — Settings UI field + persisted to `settings.json`; required for gated models (Llama, Mistral, etc.)
 
