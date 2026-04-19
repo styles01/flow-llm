@@ -50,6 +50,7 @@ class ModelDownloadRequest(BaseModel):
     hf_id: str
     filename: Optional[str] = None  # For GGUF: specific file. For MLX: None = whole repo
     local_dir: Optional[str] = None
+    expected_size_bytes: Optional[int] = None
 
 
 class ModelLoadRequest(BaseModel):
@@ -68,6 +69,7 @@ class ModelLoadRequest(BaseModel):
     mlx_reasoning_parser: str = ""
     mlx_chat_template_file: str = ""
     mlx_trust_remote_code: bool = False
+    mlx_model_type: str = "lm"  # "lm" | "multimodal"
 
 
 class ModelUnloadRequest(BaseModel):
@@ -421,38 +423,66 @@ async def get_model(model_id: str):
         session.close()
 
 
-@app.post("/api/models/download")
-async def download_model(request: ModelDownloadRequest):
-    """Download a model from HuggingFace Hub."""
-    if not hf_client:
-        raise HTTPException(500, "HuggingFace client not initialized")
+async def _monitor_download_progress(download_key: str, file_path: Path, expected_bytes: int):
+    """Poll on-disk file size to compute download progress %."""
+    from flow_llm.hf_client import _active_downloads
+    while True:
+        await asyncio.sleep(0.75)
+        entry = _active_downloads.get(download_key)
+        if not entry or entry.get("status") not in ("downloading", "registering"):
+            break
+        # huggingface_hub 1.x writes directly to local_dir — check the target file and .part suffix
+        for candidate in [file_path, Path(str(file_path) + ".part")]:
+            if candidate.exists():
+                try:
+                    size = candidate.stat().st_size
+                    entry["progress"] = min(98.0, (size / expected_bytes) * 100)
+                except Exception:
+                    pass
+                break
 
+
+async def _run_download(request: ModelDownloadRequest, download_key: str):
+    """Background task: download a model file and register it in the DB."""
+    from flow_llm.hf_client import _active_downloads
+    loop = asyncio.get_event_loop()
     session = db_session_factory()
-    try:
-        # Determine backend type
-        if request.filename and request.filename.endswith(".gguf"):
-            backend = "gguf"
-        elif request.filename is None:
-            backend = "mlx"
-        else:
-            backend = "gguf"
 
-        # Download
-        local_dir = request.local_dir or str(settings.models_dir)
-        try:
-            downloaded_path = hf_client.download_model(
+    local_dir = request.local_dir or str(settings.models_dir)
+    model_name = request.hf_id.replace("/", "__")
+    download_dir = Path(local_dir) / model_name
+
+    # Start file-size progress monitor if we know what to expect
+    monitor_task = None
+    if request.filename and request.expected_size_bytes:
+        expected_path = download_dir / request.filename
+        monitor_task = asyncio.create_task(
+            _monitor_download_progress(download_key, expected_path, request.expected_size_bytes)
+        )
+
+    try:
+        downloaded_path = await loop.run_in_executor(
+            None,
+            lambda: hf_client.download_model(
                 model_id=request.hf_id,
                 filename=request.filename,
                 local_dir=local_dir,
             )
-        except Exception as e:
-            raise HTTPException(500, f"Download failed: {e}")
+        )
 
-        # Validate template
+        if monitor_task:
+            monitor_task.cancel()
+
+        # Mark as registering while we write to DB
+        if download_key in _active_downloads:
+            _active_downloads[download_key]["status"] = "registering"
+            _active_downloads[download_key]["progress"] = 99.0
+
+        backend = "gguf" if (request.filename and request.filename.endswith(".gguf")) else ("mlx" if request.filename is None else "gguf")
+
         model_dir = downloaded_path.parent if downloaded_path.is_file() else downloaded_path
         validation = validate_model_dir(model_dir)
 
-        # Determine file paths
         if backend == "gguf":
             gguf_file = str(downloaded_path) if downloaded_path.is_file() else None
             mlx_path = None
@@ -460,32 +490,27 @@ async def download_model(request: ModelDownloadRequest):
             gguf_file = None
             mlx_path = str(downloaded_path)
 
-        # Calculate size
         size_gb = None
         if downloaded_path.is_file():
             size_gb = round(downloaded_path.stat().st_size / (1024**3), 2)
         elif downloaded_path.is_dir():
-            # For MLX: sum all files in the directory
             total_bytes = sum(f.stat().st_size for f in downloaded_path.rglob("*") if f.is_file())
             size_gb = round(total_bytes / (1024**3), 2)
 
-        # Generate model ID
         model_id = request.hf_id.replace("/", "__")
         if request.filename:
-            # For GGUF: include the filename for uniqueness
             stem = Path(request.filename).stem
             if stem.endswith(".gguf"):
                 stem = stem[:-5]
-            model_id = stem  # Use the GGUF filename stem (e.g. "gemma-4-26B-A4B-it-UD-Q4_K_M")
+            model_id = stem
 
-        # Generate display name
-        if request.filename:
-            name = request.filename
-        else:
-            # For MLX: use the repo name
-            name = request.hf_id.split("/")[-1] if "/" in request.hf_id else request.hf_id
+        name = request.filename if request.filename else (request.hf_id.split("/")[-1] if "/" in request.hf_id else request.hf_id)
 
-        # Save to registry
+        existing = session.query(Model).filter(Model.id == model_id).first()
+        if existing:
+            session.delete(existing)
+            session.flush()
+
         model = Model(
             id=model_id,
             name=name,
@@ -500,23 +525,44 @@ async def download_model(request: ModelDownloadRequest):
             supports_tools=validation.supports_tools,
             status="available",
         )
-
         session.add(model)
         session.commit()
 
+        if download_key in _active_downloads:
+            _active_downloads[download_key]["status"] = "complete"
+            _active_downloads[download_key]["progress"] = 100.0
+
         await broadcast("model_downloaded", {"model_id": model_id})
 
-        return {
-            "model_id": model_id,
-            "path": str(downloaded_path),
-            "backend": backend,
-            "template_valid": validation.valid,
-            "supports_tools": validation.supports_tools,
-            "errors": validation.errors,
-            "warnings": validation.warnings,
-        }
+    except Exception as e:
+        if monitor_task:
+            monitor_task.cancel()
+        if download_key in _active_downloads:
+            _active_downloads[download_key]["status"] = "error"
+            _active_downloads[download_key]["error"] = str(e)
+        print(f"[Flow] Download failed for {download_key}: {e}")
     finally:
         session.close()
+
+
+@app.post("/api/models/download")
+async def download_model(request: ModelDownloadRequest):
+    """Start a background download from HuggingFace Hub. Returns immediately."""
+    if not hf_client:
+        raise HTTPException(500, "HuggingFace client not initialized")
+
+    download_key = f"{request.hf_id}/{request.filename}" if request.filename else request.hf_id
+
+    from flow_llm.hf_client import _active_downloads
+    _active_downloads[download_key] = {
+        "status": "downloading",
+        "model_id": request.hf_id,
+        "filename": request.filename,
+        "progress": 0.0,
+    }
+
+    asyncio.create_task(_run_download(request, download_key))
+    return {"download_key": download_key, "status": "downloading"}
 
 
 @app.delete("/api/models/{model_id}")
@@ -857,6 +903,7 @@ async def load_model(model_id: str, request: ModelLoadRequest):
                 mlx_reasoning_parser=request.mlx_reasoning_parser,
                 mlx_chat_template_file=request.mlx_chat_template_file,
                 mlx_trust_remote_code=request.mlx_trust_remote_code,
+                mlx_model_type=request.mlx_model_type,
             )
 
             model.status = "running"

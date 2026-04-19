@@ -74,7 +74,7 @@
 | Logs page | ✅ Done — backend log viewer with per-model filter |
 | Settings page | ✅ Done — loading defaults, models dir, backend versions/updates, hardware info, OpenClaw config |
 | Telemetry page | ✅ Done — card-based request log with TTFT color-coding and token formatting |
-| Load dialog | ✅ Done — context window, parallel slots, flash attention, KV cache, GPU layers |
+| Load dialog | ✅ Done — context window, parallel slots, flash attention, KV cache, GPU layers, MLX presets (Qwen3.6 thinking/no-thinking), model type selector |
 
 ---
 

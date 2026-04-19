@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-04-19
+
+### Qwen3.6 Thinking Mode + MLX Presets
+
+- **Fixed Qwen3.6 thinking mode** — `--reasoning-parser qwen3_vl` is required for Qwen3.6 (a VLM architecture). The previous `qwen3` parser left `reasoning_content` empty. With `qwen3_vl`, `<think>` blocks stream in `reasoning_content` deltas and the final answer follows in `content` deltas.
+- **Added `mlx_model_type` parameter** — `process_manager.py`, `main.py`, and `client.ts` now accept `mlx_model_type` (`"lm"` default, `"multimodal"` for vision-language models). Exposed in the Load Dialog Advanced section.
+- **Added Load Dialog presets** — New "Preset" dropdown at the top of the MLX section applies recommended settings for a model family in one click:
+  - *Qwen3 / Qwen3.6 — Thinking Mode*: context 262,144, reasoning parser `qwen3_vl`
+  - *Qwen3 / Qwen3.6 — No Thinking*: context 262,144, no parser
+  - *Default*: resets all fields to defaults
+- **Expanded reasoning parser list** — Added `qwen3_moe` and `qwen3_vl` options to the Advanced reasoning parser dropdown.
+- **Bumped Qwen3.6 preset context to 262,144** — The model's native max; 131K was only the minimum for thinking mode to activate. For OpenClaw coding-agent use, max context is strongly preferred.
+
+### Download Progress + Memory Estimate Fixes
+
+- **Fixed download progress bar not appearing** — Download endpoint is now fire-and-forget: returns `{download_key, status}` immediately, runs the full download+register cycle in a background `asyncio.Task`. A `_monitor_download_progress` coroutine polls file size every 750ms and updates `_active_downloads`. Frontend `downloadMut.onSuccess` no longer prematurely clears the downloading state.
+- **Fixed `expected_size_bytes` plumbing** — `handleDownloadGGUF` now accepts `sizeGb` and passes `Math.round(sizeGb * 1024**3)` to the API so the progress bar has a denominator.
+- **Fixed memory estimate rejecting large valid models** — `estimate_model_memory()` in `hardware.py` had a `scale_factor = max(1.0, size_gb / 10.0)` multiplier that inflated KV cache estimates (e.g. 45 GB for a 20 GB model on 40 GB hardware). Removed the scale factor; the raw KV cache calculation is already accurate.
+
+### Files Modified (2026-04-19)
+- `server/flow_llm/hardware.py` — removed `scale_factor` from `estimate_model_memory`
+- `server/flow_llm/main.py` — fire-and-forget download, `_monitor_download_progress`, `_run_download`, `mlx_model_type` in `LoadModelRequest`
+- `server/flow_llm/process_manager.py` — `mlx_model_type` param in `BackendProcess` and `load_model`
+- `web/src/api/client.ts` — `mlx_model_type` in `loadModel` opts; `expectedSizeBytes` in `downloadModel`
+- `web/src/components/LoadDialog.tsx` — Preset dropdown, Model Type select in Advanced, expanded reasoning parser list
+- `web/src/pages/Models.tsx` — `sizeGb` passed to `handleDownloadGGUF`, `null→undefined` TS fix
+
+---
+
 ## 2026-04-12
 
 ### Backend Update Management

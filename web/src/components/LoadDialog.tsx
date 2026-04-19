@@ -37,6 +37,21 @@ export function LoadDialog({ model, onClose }: LoadDialogProps) {
   const [reasoningParser, setReasoningParser] = useState('')
   const [chatTemplateFile, setChatTemplateFile] = useState('')
   const [trustRemoteCode, setTrustRemoteCode] = useState(false)
+  const [mlxModelType, setMlxModelType] = useState('lm')
+
+  const MLX_PRESETS: Record<string, { label: string; ctx: number; parser: string; modelType: string }> = {
+    qwen3_thinking: { label: 'Qwen3 / Qwen3.6 — Thinking Mode', ctx: 262144, parser: 'qwen3_vl', modelType: 'lm' },
+    qwen3_notthinking: { label: 'Qwen3 / Qwen3.6 — No Thinking', ctx: 262144, parser: '', modelType: 'lm' },
+    default: { label: 'Default (no preset)', ctx: 0, parser: '', modelType: 'lm' },
+  }
+
+  function applyPreset(key: string) {
+    const p = MLX_PRESETS[key]
+    if (!p) return
+    setMlxContextLength(p.ctx)
+    setReasoningParser(p.parser)
+    setMlxModelType(p.modelType)
+  }
 
   // --- Common ---
 
@@ -77,6 +92,7 @@ export function LoadDialog({ model, onClose }: LoadDialogProps) {
       mlx_reasoning_parser: isMLX ? (reasoningParser || undefined) : undefined,
       mlx_chat_template_file: isMLX ? (chatTemplateFile || undefined) : undefined,
       mlx_trust_remote_code: isMLX ? trustRemoteCode : undefined,
+      mlx_model_type: isMLX ? mlxModelType : undefined,
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['models'] })
@@ -294,6 +310,26 @@ export function LoadDialog({ model, onClose }: LoadDialogProps) {
 
           {isMLX && (
             <>
+              {/* Preset */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">
+                  Preset
+                </label>
+                <select
+                  onChange={e => applyPreset(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  defaultValue=""
+                >
+                  <option value="">— select a preset —</option>
+                  {Object.entries(MLX_PRESETS).map(([k, p]) => (
+                    <option key={k} value={k}>{p.label}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Apply recommended settings for a specific model family
+                </p>
+              </div>
+
               {/* Context Length */}
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1">
@@ -363,6 +399,8 @@ export function LoadDialog({ model, onClose }: LoadDialogProps) {
                       <option value="gemma4">Gemma 4</option>
                       <option value="qwen3">Qwen 3</option>
                       <option value="qwen3_5">Qwen 3.5</option>
+                      <option value="qwen3_moe">Qwen 3 MoE</option>
+                      <option value="qwen3_vl">Qwen 3 VL / Qwen 3.6</option>
                       <option value="hermes">Hermes</option>
                       <option value="harmony">Harmony</option>
                       <option value="nemotron3_nano">Nemotron 3 Nano</option>
@@ -397,6 +435,23 @@ export function LoadDialog({ model, onClose }: LoadDialogProps) {
                     />
                     Trust Remote Code
                   </label>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-1">
+                      Model Type
+                    </label>
+                    <select
+                      value={mlxModelType}
+                      onChange={e => setMlxModelType(e.target.value)}
+                      className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    >
+                      <option value="lm">lm — text only (default)</option>
+                      <option value="multimodal">multimodal — vision + text</option>
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Use multimodal for vision-language models (VLMs)
+                    </p>
+                  </div>
                 </div>
               </details>
             </>

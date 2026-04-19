@@ -115,7 +115,4 @@ def estimate_model_memory(size_gb: float, ctx_size: int, quant_kv: str = "q4_0")
     kv_per_token_gb = bytes_per_token.get(quant_kv, 0.00025)  # default to f16
     kv_total_gb = ctx_size * kv_per_token_gb * 2  # 2 for K and V
 
-    # Scale by model size (heuristic: larger models have larger KV)
-    scale_factor = max(1.0, size_gb / 10.0)  # 10GB is our baseline
-
-    return round(model_memory + (kv_total_gb * scale_factor), 1)
+    return round(model_memory + kv_total_gb, 1)

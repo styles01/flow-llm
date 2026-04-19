@@ -121,6 +121,7 @@ class BackendProcess:
         mlx_reasoning_parser: str = "",
         mlx_chat_template_file: str = "",
         mlx_trust_remote_code: bool = False,
+        mlx_model_type: str = "lm",
         host: str = DEFAULT_LLAMACPP_HOST
     ):
         self.model_id = model_id
@@ -141,6 +142,7 @@ class BackendProcess:
         self.mlx_reasoning_parser = mlx_reasoning_parser
         self.mlx_chat_template_file = mlx_chat_template_file
         self.mlx_trust_remote_code = mlx_trust_remote_code
+        self.mlx_model_type = mlx_model_type
         self.host = host
         self.process: Optional[subprocess.Popen] = None
         self._health_task: Optional[asyncio.Task] = None
@@ -241,7 +243,7 @@ class BackendProcess:
                 "mlx-openai-server",
                 "launch",
                 "--model-path", self.model_path,
-                "--model-type", "lm",
+                "--model-type", self.mlx_model_type or "lm",
                 "--host", self.host,
                 "--port", str(self.port),
             ]
@@ -422,6 +424,7 @@ class ProcessManager:
         mlx_reasoning_parser: str = "",
         mlx_chat_template_file: str = "",
         mlx_trust_remote_code: bool = False,
+        mlx_model_type: str = "lm",
     ) -> BackendProcess:
         """Start a model on a backend. Returns the BackendProcess."""
         if model_id in self._processes:
@@ -450,6 +453,7 @@ class ProcessManager:
             mlx_reasoning_parser=mlx_reasoning_parser,
             mlx_chat_template_file=mlx_chat_template_file,
             mlx_trust_remote_code=mlx_trust_remote_code,
+            mlx_model_type=mlx_model_type,
         )
 
         try:

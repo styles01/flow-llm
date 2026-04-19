@@ -142,7 +142,8 @@ Prioritized implementation checklist.
 - [ ] Automated fidelity test suite (Flow output == direct llama.cpp output)
 - [ ] Long context benchmark (1K, 4K, 16K, 100K)
 - [ ] Dual hardware validation (Mini + Max)
-- [ ] Reasoning mode test (Gemma 4 `<|think|>` tags)
+- [x] Reasoning mode test — Qwen3.6 `<think>` blocks working via `--reasoning-parser qwen3_vl`
+- [ ] Reasoning mode test — Gemma 4 `<|think|>` tags (llama.cpp)
 
 ### Polish & Hardening
 - [ ] macOS menu bar app (PyObjC, start/stop/monitor server, auto-restart on crash, in-app auto-update)

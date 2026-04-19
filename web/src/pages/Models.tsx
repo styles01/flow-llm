@@ -52,14 +52,10 @@ export default function ModelsPage() {
     enabled: !!selectedModel,
   })
 
-  // Download model
+  // Download model — endpoint returns immediately; DownloadProgress polls for completion
   const downloadMut = useMutation({
-    mutationFn: ({ hfId, filename }: { hfId: string; filename?: string }) =>
-      api.downloadModel(hfId, filename),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['models'] })
-      setDownloading(null)
-    },
+    mutationFn: ({ hfId, filename, expectedSizeBytes }: { hfId: string; filename?: string; expectedSizeBytes?: number }) =>
+      api.downloadModel(hfId, filename, undefined, expectedSizeBytes),
     onError: () => {
       setDownloading(null)
     },
@@ -125,9 +121,10 @@ export default function ModelsPage() {
   const hasMlx = hfDetails?.has_mlx || !!hfDetails?.mlx_repo_id
   const mlxDetails = hfDetails?.mlx_details
 
-  const handleDownloadGGUF = (hfId: string, filename: string) => {
+  const handleDownloadGGUF = (hfId: string, filename: string, sizeGb?: number) => {
     setDownloading(filename)
-    downloadMut.mutate({ hfId, filename })
+    const expectedSizeBytes = sizeGb ? Math.round(sizeGb * 1024 ** 3) : undefined
+    downloadMut.mutate({ hfId, filename, expectedSizeBytes })
   }
 
   const handleDownloadMLX = (hfId: string) => {
@@ -497,24 +494,27 @@ export default function ModelsPage() {
                     Choose a quantization level. Higher = better quality, larger file.
                   </p>
                   {ggufFiles.map((f: GGUFFile) => (
-                    <div key={f.filename} className="flex items-center justify-between py-2 px-3 bg-gray-800 rounded">
-                      <div className="min-w-0 flex-1">
-                        <p className="font-mono text-sm truncate">{f.filename}</p>
-                        <div className="flex gap-3 text-xs text-gray-400 mt-0.5">
-                          {f.quantization && <span className="text-blue-300">{f.quantization}</span>}
-                          {f.size_gb && <span>{f.size_gb} GB</span>}
+                    <div key={f.filename} className="py-2 px-3 bg-gray-800 rounded">
+                      <div className="flex items-center justify-between">
+                        <div className="min-w-0 flex-1">
+                          <p className="font-mono text-sm truncate">{f.filename}</p>
+                          <div className="flex gap-3 text-xs text-gray-400 mt-0.5">
+                            {f.quantization && <span className="text-blue-300">{f.quantization}</span>}
+                            {f.size_gb && <span>{f.size_gb} GB</span>}
+                          </div>
                         </div>
+                        <button
+                          onClick={() => handleDownloadGGUF(
+                            hfDetails.gguf_repo_id || hfDetails.id,
+                            f.filename,
+                            f.size_gb ?? undefined,
+                          )}
+                          disabled={downloading === f.filename}
+                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 rounded text-sm font-medium ml-3 whitespace-nowrap"
+                        >
+                          {downloading === f.filename ? 'Downloading...' : 'Download'}
+                        </button>
                       </div>
-                      <button
-                        onClick={() => handleDownloadGGUF(
-                          hfDetails.gguf_repo_id || hfDetails.id,
-                          f.filename
-                        )}
-                        disabled={downloading === f.filename}
-                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 rounded text-sm font-medium ml-3 whitespace-nowrap"
-                      >
-                        {downloading === f.filename ? 'Downloading...' : 'Download'}
-                      </button>
                       {downloading === f.filename && (
                         <DownloadProgress
                           downloadKey={`${hfDetails.gguf_repo_id || hfDetails.id}/${f.filename}`}

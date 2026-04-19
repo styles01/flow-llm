@@ -176,15 +176,16 @@ export const api = {
   listModels: () => fetchAPI<ModelInfo[]>('/models'),
   getModel: (id: string) => fetchAPI<ModelInfo>(`/models/${encodeURIComponent(id)}`),
   deleteModel: (id: string) => fetchAPI<{ status: string }>(`/models/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  downloadModel: (hfId: string, filename?: string, localDir?: string) =>
-    fetchAPI<{ model_id: string; path: string }>('/models/download', {
+  downloadModel: (hfId: string, filename?: string, localDir?: string, expectedSizeBytes?: number) =>
+    fetchAPI<{ download_key: string; status: string }>('/models/download', {
       method: 'POST',
-      body: JSON.stringify({ hf_id: hfId, filename, local_dir: localDir }),
+      body: JSON.stringify({ hf_id: hfId, filename, local_dir: localDir, expected_size_bytes: expectedSizeBytes }),
     }),
   loadModel: (id: string, opts?: {
     ctx_size?: number; flash_attn?: string; cache_type_k?: string; cache_type_v?: string; gpu_layers?: number; n_parallel?: number;
     mlx_context_length?: number; mlx_prompt_cache_size?: number; mlx_enable_auto_tool_choice?: boolean;
     mlx_reasoning_parser?: string; mlx_chat_template_file?: string; mlx_trust_remote_code?: boolean;
+    mlx_model_type?: string;
   }) =>
     fetchAPI<{ model_id: string; status: string; port: number; base_url: string }>(`/models/${encodeURIComponent(id)}/load`, {
       method: 'POST',
