@@ -168,6 +168,34 @@ export interface ModelActivity {
   requests: TrackedRequest[]     // active requests from request tracker
 }
 
+export interface ModelConfig {
+  temperature?: number
+  top_p?: number
+  top_k?: number
+  presence_penalty?: number
+  repetition_penalty?: number
+  chat_template_kwargs?: Record<string, unknown>
+}
+
+export interface Preset {
+  id: string
+  name: string
+  builtin: boolean
+  config: ModelConfig
+}
+
+export interface ModelConfigResponse {
+  config: ModelConfig
+  load_params: {
+    backend: string
+    ctx_size: number | null
+    n_parallel: number | null
+    mlx_context_length: number | null
+    mlx_reasoning_parser: string | null
+    mlx_model_type: string | null
+  }
+}
+
 export const api = {
   // Hardware
   getHardware: () => fetchAPI<HardwareInfo>('/hardware'),
@@ -261,4 +289,24 @@ export const api = {
   // Active request tracker (polling fallback for WebSocket)
   getRequests: () =>
     fetchAPI<{ requests: Record<string, TrackedRequest[]> }>('/requests'),
+
+  // Per-model runtime config
+  getModelConfig: (id: string) =>
+    fetchAPI<ModelConfigResponse>(`/models/${encodeURIComponent(id)}/config`),
+  setModelConfig: (id: string, config: ModelConfig) =>
+    fetchAPI<{ model_id: string; config: ModelConfig }>(`/models/${encodeURIComponent(id)}/config`, {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    }),
+  resetModelConfig: (id: string) =>
+    fetchAPI<{ model_id: string; config: ModelConfig }>(`/models/${encodeURIComponent(id)}/config`, { method: 'DELETE' }),
+
+  // Presets
+  listPresets: () => fetchAPI<{ presets: Preset[] }>('/presets'),
+  createPreset: (name: string, config: ModelConfig) =>
+    fetchAPI<Preset>('/presets', { method: 'POST', body: JSON.stringify({ name, config }) }),
+  updatePreset: (id: string, data: { name?: string; config?: ModelConfig }) =>
+    fetchAPI<Preset>(`/presets/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deletePreset: (id: string) =>
+    fetchAPI<{ status: string }>(`/presets/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 };

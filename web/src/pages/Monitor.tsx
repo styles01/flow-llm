@@ -8,9 +8,10 @@ import { api, type ModelActivity } from '../api/client'
 import { EmptyState } from '../components/EmptyState'
 import { RequestBeam } from '../components/RequestBeam'
 import { IdleWaveform } from '../components/IdleWaveform'
+import ModelConfigDrawer from '../components/ModelConfigDrawer'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useMonitor, monitorActions, type TrackedRequest } from '../store/monitorStore'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 
 function RequestPipeline({
   modelId,
@@ -98,6 +99,7 @@ function RequestPipeline({
 
 export default function MonitorPage() {
   const queryClient = useQueryClient()
+  const [drawerModel, setDrawerModel] = useState<{ id: string; name: string } | null>(null)
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['running'],
     queryFn: () => api.listRunning(),
@@ -236,6 +238,12 @@ export default function MonitorPage() {
                   </p>
                 </div>
                 <div className="flex gap-2">
+                  <button
+                    onClick={() => setDrawerModel({ id: m.model_id, name: m.name })}
+                    className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-sm"
+                  >
+                    Configure
+                  </button>
                   <a
                     href={m.base_url.replace('/v1', '/')}
                     target="_blank"
@@ -259,6 +267,14 @@ export default function MonitorPage() {
             </div>
           ))}
         </div>
+      )}
+
+      {drawerModel && (
+        <ModelConfigDrawer
+          modelId={drawerModel.id}
+          modelName={drawerModel.name}
+          onClose={() => setDrawerModel(null)}
+        />
       )}
     </div>
   )

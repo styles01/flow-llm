@@ -1,11 +1,40 @@
 /**
- * Ephemeral session store — lives in memory while the app is open.
- * Survives route changes, gone on page refresh.
- * Uses useSyncExternalStore for React integration.
+ * Session store — survives route changes and page reloads.
+ * Chat state (messages, model, prompt) is persisted to localStorage.
+ * Transient state (streaming, telemetry, logs) is ephemeral.
  */
 
 import { useSyncExternalStore } from 'react'
 import type { TelemetryRecord } from '../api/client'
+
+const LS_KEY = 'flow_chat_session'
+
+interface PersistedChat {
+  messages: Message[]
+  selectedModel: string
+  systemPrompt: string
+}
+
+function loadFromStorage(): PersistedChat | null {
+  try {
+    const raw = localStorage.getItem(LS_KEY)
+    if (!raw) return null
+    return JSON.parse(raw) as PersistedChat
+  } catch {
+    return null
+  }
+}
+
+function saveToStorage(s: SessionState) {
+  try {
+    const data: PersistedChat = {
+      messages: s.messages,
+      selectedModel: s.selectedModel,
+      systemPrompt: s.systemPrompt,
+    }
+    localStorage.setItem(LS_KEY, JSON.stringify(data))
+  } catch {}
+}
 
 export interface Message {
   role: 'system' | 'user' | 'assistant'
@@ -29,10 +58,12 @@ interface SessionState {
   logAutoScroll: boolean
 }
 
+const _saved = loadFromStorage()
+
 const state: SessionState = {
-  messages: [],
-  selectedModel: '',
-  systemPrompt: 'You are a helpful assistant.',
+  messages: _saved?.messages ?? [],
+  selectedModel: _saved?.selectedModel ?? '',
+  systemPrompt: _saved?.systemPrompt ?? 'You are a helpful assistant.',
   includeTools: false,
   streaming: false,
   lastTelemetry: null,
@@ -74,6 +105,9 @@ function update(partial: Partial<SessionState>) {
   Object.assign(state, partial)
   snapshotVersion++
   emit()
+  if ('messages' in partial || 'selectedModel' in partial || 'systemPrompt' in partial) {
+    saveToStorage(state)
+  }
 }
 
 // --- Chat actions ---

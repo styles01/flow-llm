@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Optional
@@ -41,6 +42,61 @@ if not WEB_DIST.exists():
 db_session_factory = None
 hf_client: Optional[HuggingFaceClient] = None
 ws_connections: list[WebSocket] = []  # For real-time updates to frontend
+
+# Per-model runtime config — ephemeral, cleared on unload/restart
+_model_configs: dict[str, dict] = {}
+
+# Built-in (read-only) presets
+BUILTIN_PRESETS = [
+    {
+        "id": "qwen3_thinking",
+        "name": "Qwen3.6 — Thinking",
+        "builtin": True,
+        "config": {
+            "temperature": 0.6,
+            "top_p": 0.95,
+            "top_k": 20,
+            "presence_penalty": 1.5,
+            "chat_template_kwargs": {"preserve_thinking": True, "enable_thinking": True},
+        },
+    },
+    {
+        "id": "qwen3_no_thinking",
+        "name": "Qwen3.6 — No Thinking",
+        "builtin": True,
+        "config": {
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "top_k": 20,
+            "presence_penalty": 1.5,
+            "chat_template_kwargs": {"enable_thinking": False},
+        },
+    },
+    {
+        "id": "qwen3_thinking_coding",
+        "name": "Qwen3.6 — Thinking (coding)",
+        "builtin": True,
+        "config": {
+            "temperature": 0.6,
+            "top_p": 0.95,
+            "top_k": 20,
+            "presence_penalty": 0.0,
+            "chat_template_kwargs": {"preserve_thinking": True, "enable_thinking": True},
+        },
+    },
+    {
+        "id": "gemma4",
+        "name": "Gemma 4",
+        "builtin": True,
+        "config": {"temperature": 1.0},
+    },
+    {
+        "id": "default",
+        "name": "Default (no injection)",
+        "builtin": True,
+        "config": {},
+    },
+]
 
 
 # --- Pydantic models ---
@@ -967,10 +1023,98 @@ async def unload_model(model_id: str):
         session.commit()
 
         await broadcast("model_unloaded", {"model_id": model_id})
+        _model_configs.pop(model_id, None)
 
         return {"model_id": model_id, "status": "available", "killed": stopped}
     finally:
         session.close()
+
+
+# --- Per-model runtime config ---
+
+
+@app.get("/api/models/{model_id}/config")
+async def get_model_config(model_id: str):
+    """Return current runtime config for a loaded model, plus its load-time params."""
+    proc = process_manager.get_process(model_id)
+    load_params: dict = {}
+    if proc:
+        load_params = {
+            "backend": proc.backend,
+            "ctx_size": getattr(proc, "ctx_size", None),
+            "n_parallel": getattr(proc, "n_parallel", None),
+            "mlx_context_length": getattr(proc, "mlx_context_length", None),
+            "mlx_reasoning_parser": getattr(proc, "mlx_reasoning_parser", None),
+            "mlx_model_type": getattr(proc, "mlx_model_type", None),
+        }
+    return {"config": _model_configs.get(model_id, {}), "load_params": load_params}
+
+
+@app.put("/api/models/{model_id}/config")
+async def set_model_config(model_id: str, body: dict):
+    """Set (merge) runtime config for a model. Caller values win on conflict."""
+    _model_configs[model_id] = body
+    return {"model_id": model_id, "config": _model_configs[model_id]}
+
+
+@app.delete("/api/models/{model_id}/config")
+async def reset_model_config(model_id: str):
+    """Clear runtime config for a model (backend defaults apply)."""
+    _model_configs.pop(model_id, None)
+    return {"model_id": model_id, "config": {}}
+
+
+# --- Presets ---
+
+
+@app.get("/api/presets")
+async def list_presets():
+    """Return built-in presets + user presets."""
+    data = settings.load_presets()
+    return {"presets": BUILTIN_PRESETS + data.get("user_presets", [])}
+
+
+@app.post("/api/presets")
+async def create_preset(body: dict):
+    """Create a new user preset."""
+    name = body.get("name", "").strip()
+    config = body.get("config", {})
+    if not name:
+        raise HTTPException(400, "name is required")
+    data = settings.load_presets()
+    preset = {"id": str(uuid.uuid4()), "name": name, "builtin": False, "config": config}
+    data.setdefault("user_presets", []).append(preset)
+    settings.save_presets(data)
+    return preset
+
+
+@app.put("/api/presets/{preset_id}")
+async def update_preset(preset_id: str, body: dict):
+    """Update a user preset (name and/or config)."""
+    data = settings.load_presets()
+    for p in data.get("user_presets", []):
+        if p["id"] == preset_id:
+            if "name" in body:
+                p["name"] = body["name"]
+            if "config" in body:
+                p["config"] = body["config"]
+            settings.save_presets(data)
+            return p
+    raise HTTPException(404, f"Preset {preset_id} not found")
+
+
+@app.delete("/api/presets/{preset_id}")
+async def delete_preset(preset_id: str):
+    """Delete a user preset. Built-in presets cannot be deleted."""
+    if any(p["id"] == preset_id for p in BUILTIN_PRESETS):
+        raise HTTPException(400, "Cannot delete built-in presets")
+    data = settings.load_presets()
+    before = len(data.get("user_presets", []))
+    data["user_presets"] = [p for p in data.get("user_presets", []) if p["id"] != preset_id]
+    if len(data["user_presets"]) == before:
+        raise HTTPException(404, f"Preset {preset_id} not found")
+    settings.save_presets(data)
+    return {"status": "deleted"}
 
 
 # --- Management API: HuggingFace Search ---
@@ -1417,10 +1561,26 @@ async def chat_completions(request: dict):
     start_time = time.monotonic()
     backend_url = proc.base_url
 
-    if request.get("stream", False):
+    # Inject per-model runtime config — caller values always take precedence
+    _cfg = _model_configs.get(model_name, {})
+    if _cfg:
+        req_body = {**request}
+        for _k in ("temperature", "top_p", "top_k", "presence_penalty", "repetition_penalty"):
+            if _k in _cfg and _k not in req_body:
+                req_body[_k] = _cfg[_k]
+        if "chat_template_kwargs" in _cfg:
+            _extra = dict(req_body.get("extra_body") or {})
+            _ctk = dict(_extra.get("chat_template_kwargs") or {})
+            _ctk.update(_cfg["chat_template_kwargs"])
+            _extra["chat_template_kwargs"] = _ctk
+            req_body["extra_body"] = _extra
+    else:
+        req_body = request
+
+    if req_body.get("stream", False):
         # Streaming response — client must outlive the generator
         # Estimate input tokens from request messages as a fallback
-        request_input_estimate = _estimate_input_tokens(request)
+        request_input_estimate = _estimate_input_tokens(req_body)
 
         async def stream_with_metrics():
             first_token_time = None
@@ -1433,7 +1593,7 @@ async def chat_completions(request: dict):
                 async with client.stream(
                     "POST",
                     f"{backend_url}/v1/chat/completions",
-                    json=request,
+                    json=req_body,
                     headers={"Content-Type": "application/json"},
                 ) as response:
                     update_request(track_id, stage="prefilling")
@@ -1513,7 +1673,7 @@ async def chat_completions(request: dict):
             async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=600.0, write=30.0, pool=30.0)) as client:
                 response = await client.post(
                     f"{backend_url}/v1/chat/completions",
-                    json=request,
+                    json=req_body,
                     headers={"Content-Type": "application/json"},
                 )
 

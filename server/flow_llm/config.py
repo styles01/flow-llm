@@ -112,5 +112,22 @@ class Settings:
         }
         sf.write_text(json.dumps(data, indent=2))
 
+    def _presets_file(self) -> Path:
+        return self.data_dir / "presets.json"
+
+    def load_presets(self) -> dict:
+        pf = self._presets_file()
+        if not pf.exists():
+            return {"user_presets": []}
+        try:
+            return json.loads(pf.read_text())
+        except Exception:
+            return {"user_presets": []}
+
+    def save_presets(self, data: dict):
+        pf = self._presets_file()
+        pf.parent.mkdir(parents=True, exist_ok=True)
+        pf.write_text(json.dumps(data, indent=2))
+
 
 settings = Settings()

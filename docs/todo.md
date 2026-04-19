@@ -119,8 +119,8 @@ Prioritized implementation checklist.
 
 ### 🔴 Critical — Blocking Real Use
 
-- [ ] **Per-model runtime config** — `_model_configs` in-memory dict, GET/PUT/DELETE endpoints, proxy injection of sampling defaults (`temperature`, `top_p`, `top_k`, `presence_penalty`) and `chat_template_kwargs` (`preserve_thinking`, `enable_thinking`); exposed on Monitor page per loaded model — see `docs/model-config-plan.md`
-- [ ] **Chat history persistence** — `sessionStore.ts` is pure in-memory; history lost on every page refresh. Persist messages + selectedModel + systemPrompt to `localStorage` so chat survives reloads.
+- [x] **Per-model runtime config** — `_model_configs` in-memory dict, GET/PUT/DELETE endpoints, proxy injection of sampling defaults (`temperature`, `top_p`, `top_k`, `presence_penalty`) and `chat_template_kwargs` (`preserve_thinking`, `enable_thinking`); exposed on Monitor page per loaded model — see `docs/model-config-plan.md`
+- [x] **Chat history persistence** — `sessionStore.ts` persists messages + selectedModel + systemPrompt to `localStorage`; hydrates on page reload.
 - [ ] **Backend crash detection** — periodic health ping from server to loaded backends; mark model as "error" on failure; frontend notification
 - [ ] **HuggingFace API token config** — Settings UI field + persisted to `settings.json`; required for gated models (Llama, Mistral, etc.)
 
