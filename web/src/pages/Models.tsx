@@ -111,9 +111,10 @@ export default function ModelsPage() {
     },
   })
 
-  // Browse for GGUF file
-  const browseForGGUF = async () => {
+  // Browse for GGUF file or MLX directory
+  const browseForModel = async () => {
     try {
+      // First try: File picker for GGUF
       if ('showOpenFilePicker' in window) {
         const fileHandle = await (window as any).showOpenFilePicker({
           types: [{
@@ -123,16 +124,27 @@ export default function ModelsPage() {
           excludeAcceptAllOption: true,
           multiple: false,
         }).catch(() => null) // User cancelled
+        
         if (fileHandle && fileHandle[0]) {
           const file = fileHandle[0]
           const fullPath = file.path || file.name
-          // file.path is Chrome/Electron extension, fallback to name
           setRegisterPath(fullPath)
+          return
         }
-      } else {
-        // Fallback: use native file input
-        toast({ type: 'error', message: 'File browser requires Chrome/Edge' })
       }
+      
+      // Second try: Directory picker for MLX
+      if ('showDirectoryPicker' in window) {
+        const dirHandle = await (window as any).showDirectoryPicker().catch(() => null)
+        if (dirHandle) {
+          // For MLX, we store the directory path
+          const fullPath = dirHandle.path || dirHandle.name
+          setRegisterPath(fullPath)
+          return
+        }
+      }
+      
+      toast({ type: 'error', message: 'File browser requires Chrome/Edge' })
     } catch (e: any) {
       toast({ type: 'error', message: `Browse failed: ${formatError(e)}` })
     }
@@ -194,11 +206,11 @@ export default function ModelsPage() {
                   type="text"
                   value={registerPath}
                   onChange={e => setRegisterPath(e.target.value)}
-                  placeholder="Click Browse to select a .gguf file..."
+                  placeholder="Click Browse to select a .gguf file or MLX folder..."
                   className="flex-1 px-3 py-2 bg-transparent text-sm text-white placeholder-gray-600 focus:outline-none"
                 />
                 <button
-                  onClick={browseForGGUF}
+                  onClick={browseForModel}
                   className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-r-md text-sm font-medium border-l border-gray-700"
                 >
                   Browse...
