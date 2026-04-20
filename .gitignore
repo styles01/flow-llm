@@ -17,3 +17,4 @@ server/logs/
 .DS_Store
 .claude/
 logs/
+INFRASTRUCTURE.md
