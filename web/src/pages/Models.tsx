@@ -144,9 +144,9 @@ export default function ModelsPage() {
         }
       }
       
-      toast({ type: 'error', message: 'File browser requires Chrome/Edge' })
+      toast.error('File browser requires Chrome/Edge')
     } catch (e: any) {
-      toast({ type: 'error', message: `Browse failed: ${formatError(e)}` })
+      toast.error(`Browse failed: ${formatError(e)}`)
     }
   }
 
