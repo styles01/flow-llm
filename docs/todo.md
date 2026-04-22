@@ -126,6 +126,7 @@ Prioritized implementation checklist.
 
 ### 🟠 High Impact — Power User Workflow
 
+- [ ] **Remote access / mobile** — Settings toggle that starts a managed tunnel (Tailscale funnel or Cloudflare Tunnel via `cloudflared`); shows the public URL + QR code for easy phone access; no open ports required. Tailscale preferred for personal use; Cloudflare option for shareable URLs with auth.
 - [ ] **Conversation persistence** — save chat history to SQLite; Conversations page with rename/delete/export
 - [ ] **Model aliasing** — editable friendly name per model; shown in Chat/Monitor dropdowns instead of raw filenames
 - [ ] **Telemetry charts** — TTFT trend line, throughput over time, model comparison heatmap (replace flat table)
