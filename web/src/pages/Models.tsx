@@ -102,7 +102,7 @@ export default function ModelsPage() {
     mutationFn: () => fetch('/api/register-local', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ gguf_path: registerPath, name: registerName || undefined }),
+      body: JSON.stringify({ path: registerPath, name: registerName || undefined }),
     }).then(r => r.json()),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['models'] })

@@ -759,56 +759,116 @@ async def get_downloads():
 
 
 class RegisterLocalRequest(BaseModel):
-    gguf_path: str
+    gguf_path: Optional[str] = None  # Kept for backwards compatibility
+    mlx_path: Optional[str] = None   # For MLX directory registration
+    path: Optional[str] = None       # Generic path - accepts GGUF files or MLX dirs
     name: Optional[str] = None
 
 
 @app.post("/api/register-local")
 async def register_local_model(request: RegisterLocalRequest):
-    """Register a local GGUF file that's already on disk (e.g., downloaded manually).
+    """Register a local GGUF file or MLX directory that's already on disk.
 
-    This is for models like the one used in gemma4.sh that were downloaded
-    outside of Flow LLM.
+    This is for models downloaded manually outside of Flow LLM.
+    Accepts:
+      - GGUF files (path/gguf_path or path ending in .gguf)
+      - MLX directories (mlx_path or path to a directory)
     """
-    path = Path(request.gguf_path)
-    if not path.exists():
-        raise HTTPException(404, f"File not found: {request.gguf_path}")
-    if not path.suffix == ".gguf":
-        raise HTTPException(400, "Only GGUF files can be registered this way")
+    # Determine the actual path to use
+    if request.path:
+        target_path = Path(request.path)
+        # Detect type based on what it actually is
+        if target_path.is_dir():
+            is_mlx = True
+        elif target_path.suffix == ".gguf":
+            is_mlx = False
+        else:
+            raise HTTPException(400, "Path must be a .gguf file or a directory containing MLX model")
+    elif request.gguf_path:
+        target_path = Path(request.gguf_path)
+        is_mlx = False
+    elif request.mlx_path:
+        target_path = Path(request.mlx_path)
+        is_mlx = True
+    else:
+        raise HTTPException(400, "Must provide 'path', 'gguf_path', or 'mlx_path'")
+
+    if not target_path.exists():
+        raise HTTPException(404, f"Path not found: {target_path}")
 
     session = db_session_factory()
     try:
-        # Check if already registered
-        existing = session.query(Model).filter(Model.gguf_file == str(path)).first()
-        if existing:
-            return {"model_id": existing.id, "status": "already_registered"}
+        if is_mlx or target_path.is_dir():
+            # MLX directory registration
+            if not target_path.is_dir():
+                raise HTTPException(400, f"MLX path must be a directory: {target_path}")
 
-        model_name = request.name or path.name
-        model_id = path.stem
+            # Check if already registered
+            existing = session.query(Model).filter(Model.mlx_path == str(target_path)).first()
+            if existing:
+                return {"model_id": existing.id, "status": "already_registered"}
 
-        # Validate template
-        from flow_llm.template_validator import validate_model_dir
-        validation = validate_model_dir(path.parent)
+            # Calculate directory size
+            total_size = sum(f.stat().st_size for f in target_path.rglob('*') if f.is_file())
+            size_gb = round(total_size / (1024**3), 2)
 
-        size_gb = round(path.stat().st_size / (1024**3), 2)
+            model_name = request.name or target_path.name
+            model_id = target_path.name
 
-        model = Model(
-            id=model_id,
-            name=model_name,
-            hf_id=None,
-            backend="gguf",
-            gguf_file=str(path),
-            mlx_path=None,
-            quantization=HuggingFaceClient._extract_quant(path.name),
-            size_gb=size_gb,
-            template_valid=validation.valid,
-            supports_tools=validation.supports_tools,
-            status="available",
-        )
+            # Validate template
+            from flow_llm.template_validator import validate_model_dir
+            validation = validate_model_dir(target_path)
+
+            model = Model(
+                id=model_id,
+                name=model_name,
+                hf_id=None,
+                backend="mlx",
+                gguf_file=None,
+                mlx_path=str(target_path),
+                quantization=None,  # MLX doesn't have quantization in the same way
+                size_gb=size_gb,
+                template_valid=validation.valid,
+                supports_tools=validation.supports_tools,
+                status="available",
+            )
+        else:
+            # GGUF file registration
+            if not target_path.is_file() or target_path.suffix != ".gguf":
+                raise HTTPException(400, "GGUF path must be a .gguf file")
+
+            # Check if already registered
+            existing = session.query(Model).filter(Model.gguf_file == str(target_path)).first()
+            if existing:
+                return {"model_id": existing.id, "status": "already_registered"}
+
+            model_name = request.name or target_path.name
+            model_id = target_path.stem
+
+            # Validate template
+            from flow_llm.template_validator import validate_model_dir
+            validation = validate_model_dir(target_path.parent)
+
+            size_gb = round(target_path.stat().st_size / (1024**3), 2)
+
+            model = Model(
+                id=model_id,
+                name=model_name,
+                hf_id=None,
+                backend="gguf",
+                gguf_file=str(target_path),
+                mlx_path=None,
+                quantization=HuggingFaceClient._extract_quant(target_path.name),
+                size_gb=size_gb,
+                template_valid=validation.valid,
+                supports_tools=validation.supports_tools,
+                status="available",
+            )
+
         session.add(model)
         session.commit()
 
-        return {"model_id": model_id, "name": model_name, "size_gb": size_gb}
+        return {"model_id": model.id, "name": model.name, "size_gb": model.size_gb}
     finally:
         session.close()
 
