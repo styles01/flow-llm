@@ -101,6 +101,7 @@ Prioritized implementation checklist.
 - [x] GGUF and MLX tabs in model detail view
 - [x] "View on HuggingFace" link on model cards
 - [x] File path shown under local model entries
+- [x] PWA manifest with dark-background icons
 
 ### Bugs Fixed
 - [x] Route ordering: `/api/models/running` before `/{model_id}` (404 fix)
@@ -207,12 +208,12 @@ Prioritized implementation checklist.
 
 ### Known Issues
 - [ ] `settings.ensure_dirs()` called twice in lifespan (harmless but redundant)
-- [ ] WebSocket `/ws` endpoint exists but frontend doesn't use it (still polling)
+- [x] ~~WebSocket `/ws` endpoint exists but frontend doesn't use it~~ — now used for live slot/prefill updates on Monitor page
 - [ ] MLX port range not auto-detected at startup (only GGUF ports scanned)
 - [ ] `HuggingFaceClient(token=None)` — no way to configure HF API token (see 🔴 section)
 - [ ] No `models_dir` validation (accepts any path, even non-existent)
 - [ ] Non-streaming and streaming error parsing use inconsistent patterns
-- [ ] Chat `max_tokens` hardcoded (now 8192) — should come from per-model config or Settings default
+- [x] ~~Chat `max_tokens` hardcoded~~ — now user-configurable in Chat UI (8192 default)
 - [ ] TTFT not recorded for thinking models when no `content` delta arrives before context exhausted
 - [ ] Non-streaming proxy puts `<think>` in `content` not `reasoning_content` (streaming only splits correctly)
 
