@@ -1015,7 +1015,7 @@ async def load_model(model_id: str, request: ModelLoadRequest):
                 n_parallel=request.n_parallel,
                 mlx_context_length=request.mlx_context_length,
                 mlx_prompt_cache_size=request.mlx_prompt_cache_size,
-                mlx_enable_auto_tool_choice=request.mlx_enable_auto_tool_choice,
+                mlx_enable_auto_tool_choice=request.mlx_enable_auto_tool_choice or (model.supports_tools is True),
                 mlx_reasoning_parser=request.mlx_reasoning_parser,
                 mlx_chat_template_file=request.mlx_chat_template_file,
                 mlx_trust_remote_code=request.mlx_trust_remote_code,
