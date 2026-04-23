@@ -135,6 +135,7 @@ Everything below is post-launch. See `docs/todo.md` for the full checklist.
 - Built-in performance benchmark (PP/TG tok/s, prefix cache testing)
 - HuggingFace model downloader in dashboard UI
 - Vision-language model support
+- **MLX auto tool-choice** — detect `supports_tools` from template validator, auto-enable `--enable-auto-tool-choice` at load time (fixed for Qwen 3.6, see `main.py` line 1018)
 - Per-model settings (sampling params, chat template kwargs, TTL, alias)
 - Built-in chat with conversation history and model switching
 - Claude Code context scaling for smaller-context models

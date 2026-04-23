@@ -113,6 +113,7 @@ Prioritized implementation checklist.
 - [x] Process manager logger not visible (added `print()` statements)
 - [x] 422 on model load (removed redundant `model_id` from `ModelLoadRequest`)
 - [x] HuggingFace search had no model card, file sizes, or download destination
+- [x] **Qwen 3.6 35B tool calls embedded in text** — `mlx_enable_auto_tool_choice` defaulted to `False` in `ModelLoadRequest`; auto-enabled when `model.supports_tools=True` (see `server/flow_llm/main.py` line 1018)
 
 ---
 
@@ -207,7 +208,7 @@ Prioritized implementation checklist.
 - [ ] Long context benchmark (1K, 4K, 16K, 100K)
 
 ### Known Issues
-- [ ] `settings.ensure_dirs()` called twice in lifespan (harmless but redundant)
+- [x] `settings.ensure_dirs()` called twice in lifespan (harmless but redundant)
 - [x] ~~WebSocket `/ws` endpoint exists but frontend doesn't use it~~ — now used for live slot/prefill updates on Monitor page
 - [ ] MLX port range not auto-detected at startup (only GGUF ports scanned)
 - [ ] `HuggingFaceClient(token=None)` — no way to configure HF API token (see 🔴 section)
@@ -215,7 +216,8 @@ Prioritized implementation checklist.
 - [ ] Non-streaming and streaming error parsing use inconsistent patterns
 - [x] ~~Chat `max_tokens` hardcoded~~ — now user-configurable in Chat UI (8192 default)
 - [ ] TTFT not recorded for thinking models when no `content` delta arrives before context exhausted
-- [ ] Non-streaming proxy puts `<think>` in `content` not `reasoning_content` (streaming only splits correctly)
+- [ ] Non-streaming proxy puts `<thinking>` in `content` not `reasoning_content` (streaming only splits correctly)
+- [x] ~~`mlx_enable_auto_tool_choice` defaulted to `False` causing Qwen 3.6 tool calls to embed in text~~ — fixed in `main.py` line 1018: auto-enables when `model.supports_tools=True`
 
 ### Future
 - [ ] Multi-machine network routing
