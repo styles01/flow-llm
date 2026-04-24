@@ -9,8 +9,8 @@
     {{- '<|im_start|>system\n' + system_message }}
 {% endif %}
 
-{% if tools is defined and tools|length > 0 %}
-    {{- '\n\n# Tools\n\nYou have access to the following functions. ONLY call functions by using the exact format shown below:\n' }}
+{% if tools %}
+    {{- '\n\n# Tools\n\nYou have access to the following functions:\n' }}
     {% for tool in tools %}
         {% if tool.function is defined %}
             {% set tool = tool.function %}
@@ -19,17 +19,26 @@
         {{- '\nDescription: ' + (tool.description | default('')) }}
         {{- '\nParameters: ' + (tool.parameters | tojson | safe) }}
     {% endfor %}
-    {{- '\n\nWhen calling a function, your response MUST be ONLY:\n<tool_call>{"name": "function_name", "arguments": {"arg1": "value1"}}</tool_call>\n' }}
-    {{- '\n<IMPORTANT>\n- No other text before or after the <tool_call> block\n- Do NOT explain your reasoning\n- Do NOT describe what you are doing\n- Output ONLY the <tool_call> tag with valid JSON inside\n</IMPORTANT>' }}
+    {{- '\n\nTo call a function, you MUST output it in this exact format OUTSIDE of any <think> block:\n' }}
+    {{- '<tool_call>{"name": "function_name", "arguments": {"arg1": "value1"}}</tool_call>\n' }}
+    {{- '\nRules:\n' }}
+    {{- '- If you need to reason, do so inside <think>...</think> first\n' }}
+    {{- '- The <tool_call> tag MUST appear AFTER the closing </think> tag, never inside it\n' }}
+    {{- '- After </think>, output ONLY the <tool_call> tag with valid JSON inside — no other text\n' }}
+    {{- '- Do not explain your reasoning outside of <think> tags\n' }}
 {% endif %}
 
 {% if system_message is defined %}
     {{- '<|im_end|>\n' }}
 {% endif %}
 
+
 {% for message in loop_messages %}
     {% if message.role == 'assistant' and message.tool_calls is defined %}
         {{- '<|im_start|>assistant\n' }}
+        {% if message.content %}
+            {{- message.content }}
+        {% endif %}
         {% for tc in message.tool_calls %}
             {{- '<tool_call>' + (tc.function | tojson | safe) + '</tool_call>' }}
         {% endfor %}

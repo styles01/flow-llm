@@ -1004,17 +1004,20 @@ async def load_model(model_id: str, request: ModelLoadRequest):
         session.commit()
 
         try:
-            # Auto-select tool-call-parser if empty but model supports tools
+            # Auto-select tool-call-parser / reasoning-parser if empty but model supports tools
             tool_call_parser = request.mlx_tool_call_parser
+            reasoning_parser = request.mlx_reasoning_parser
             chat_template_file = request.mlx_chat_template_file
             if not tool_call_parser and model.supports_tools is True:
-                rp = (request.mlx_reasoning_parser or "").lower()
                 name = model_id.lower()
-                if "qwen" in name or "qwen" in rp:
-                    if "3.5" in name or "3.5" in rp:
+                if "qwen" in name:
+                    if "3.5" in name:
                         tool_call_parser = "qwen3_coder"
                     else:
                         tool_call_parser = "qwen3"
+                    # Auto-select reasoning parser so thinking blocks are stripped cleanly
+                    if not reasoning_parser:
+                        reasoning_parser = "qwen3"
                     # Qwen MLX conversions often lose proper tool-calling format instructions;
                     # enforce a chat template that knows how to emit <tool_call> tags
                     if not chat_template_file:
@@ -1040,7 +1043,7 @@ async def load_model(model_id: str, request: ModelLoadRequest):
                 mlx_context_length=request.mlx_context_length,
                 mlx_prompt_cache_size=request.mlx_prompt_cache_size,
                 mlx_enable_auto_tool_choice=request.mlx_enable_auto_tool_choice or (model.supports_tools is True),
-                mlx_reasoning_parser=request.mlx_reasoning_parser,
+                mlx_reasoning_parser=reasoning_parser,
                 mlx_tool_call_parser=tool_call_parser,
                 mlx_chat_template_file=chat_template_file,
                 mlx_trust_remote_code=request.mlx_trust_remote_code,
@@ -1649,8 +1652,8 @@ async def chat_completions(request: dict):
 
     # Inject per-model runtime config — caller values always take precedence
     _cfg = _model_configs.get(model_name, {})
+    req_body = {**request}
     if _cfg:
-        req_body = {**request}
         for _k in ("temperature", "top_p", "top_k", "presence_penalty", "repetition_penalty"):
             if _k in _cfg and _k not in req_body:
                 req_body[_k] = _cfg[_k]
@@ -1660,8 +1663,18 @@ async def chat_completions(request: dict):
             _ctk.update(_cfg["chat_template_kwargs"])
             _extra["chat_template_kwargs"] = _ctk
             req_body["extra_body"] = _extra
-    else:
-        req_body = request
+
+    # Workaround: mlx-openai-server's multimodal handler (mlx_vlm.py) crashes when
+    # assistant messages have null content (which happens after tool_calls turns).
+    # Coerce null → "" so multimodal backends handle tool-call round-trips correctly.
+    if req_body.get("messages"):
+        _patched_msgs = []
+        for _msg in req_body["messages"]:
+            if isinstance(_msg, dict) and _msg.get("role") == "assistant" and _msg.get("content") is None:
+                _patched_msgs.append({**_msg, "content": ""})
+            else:
+                _patched_msgs.append(_msg)
+        req_body = {**req_body, "messages": _patched_msgs}
 
     if req_body.get("stream", False):
         # Streaming response — client must outlive the generator
