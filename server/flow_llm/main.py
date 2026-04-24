@@ -1135,6 +1135,7 @@ async def get_model_config(model_id: str):
             "mlx_reasoning_parser": getattr(proc, "mlx_reasoning_parser", None),
             "mlx_tool_call_parser": getattr(proc, "mlx_tool_call_parser", None),
             "mlx_model_type": getattr(proc, "mlx_model_type", None),
+            "mlx_chat_template_file": getattr(proc, "mlx_chat_template_file", None),
         }
     return {"config": _model_configs.get(model_id, {}), "load_params": load_params}
 
