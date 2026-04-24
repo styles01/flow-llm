@@ -1006,6 +1006,7 @@ async def load_model(model_id: str, request: ModelLoadRequest):
         try:
             # Auto-select tool-call-parser if empty but model supports tools
             tool_call_parser = request.mlx_tool_call_parser
+            chat_template_file = request.mlx_chat_template_file
             if not tool_call_parser and model.supports_tools is True:
                 rp = (request.mlx_reasoning_parser or "").lower()
                 name = model_id.lower()
@@ -1014,6 +1015,17 @@ async def load_model(model_id: str, request: ModelLoadRequest):
                         tool_call_parser = "qwen3_coder"
                     else:
                         tool_call_parser = "qwen3"
+                    # Qwen MLX conversions often lose proper tool-calling format instructions;
+                    # enforce a chat template that knows how to emit <tool_call> tags
+                    if not chat_template_file:
+                        import pathlib
+                        default_tpl = (
+                            pathlib.Path(__file__).parent.parent.parent
+                            / "templates"
+                            / "qwen36_tools_hermes.jinja"
+                        )
+                        if default_tpl.exists():
+                            chat_template_file = str(default_tpl)
 
             proc = await process_manager.start_model(
                 model_id=model_id,
@@ -1030,7 +1042,7 @@ async def load_model(model_id: str, request: ModelLoadRequest):
                 mlx_enable_auto_tool_choice=request.mlx_enable_auto_tool_choice or (model.supports_tools is True),
                 mlx_reasoning_parser=request.mlx_reasoning_parser,
                 mlx_tool_call_parser=tool_call_parser,
-                mlx_chat_template_file=request.mlx_chat_template_file,
+                mlx_chat_template_file=chat_template_file,
                 mlx_trust_remote_code=request.mlx_trust_remote_code,
                 mlx_model_type=request.mlx_model_type,
             )
