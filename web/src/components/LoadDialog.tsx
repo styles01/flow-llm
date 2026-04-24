@@ -35,14 +35,16 @@ export function LoadDialog({ model, onClose }: LoadDialogProps) {
   const [promptCacheSize, setPromptCacheSize] = useState(10)
   const [enableAutoToolChoice, setEnableAutoToolChoice] = useState(false)
   const [reasoningParser, setReasoningParser] = useState('')
+  const [toolCallParser, setToolCallParser] = useState('')
   const [chatTemplateFile, setChatTemplateFile] = useState('')
   const [trustRemoteCode, setTrustRemoteCode] = useState(false)
   const [mlxModelType, setMlxModelType] = useState('lm')
 
-  const MLX_PRESETS: Record<string, { label: string; ctx: number; parser: string; modelType: string }> = {
-    qwen3_thinking: { label: 'Qwen3 / Qwen3.6 — Thinking Mode', ctx: 262144, parser: 'qwen3_vl', modelType: 'lm' },
-    qwen3_notthinking: { label: 'Qwen3 / Qwen3.6 — No Thinking', ctx: 262144, parser: '', modelType: 'lm' },
-    default: { label: 'Default (no preset)', ctx: 0, parser: '', modelType: 'lm' },
+  const MLX_PRESETS: Record<string, { label: string; ctx: number; parser: string; toolParser: string; modelType: string }> = {
+    qwen3_thinking: { label: 'Qwen3 / Qwen3.6 — Thinking + Tools', ctx: 262144, parser: 'qwen3_vl', toolParser: 'qwen3', modelType: 'lm' },
+    qwen35_thinking: { label: 'Qwen3.5 — Thinking + Tools', ctx: 262144, parser: 'qwen3_5', toolParser: 'qwen3_coder', modelType: 'multimodal' },
+    qwen3_notthinking: { label: 'Qwen3 / Qwen3.6 — No Thinking', ctx: 262144, parser: '', toolParser: '', modelType: 'lm' },
+    default: { label: 'Default (no preset)', ctx: 0, parser: '', toolParser: '', modelType: 'lm' },
   }
 
   function applyPreset(key: string) {
@@ -50,6 +52,7 @@ export function LoadDialog({ model, onClose }: LoadDialogProps) {
     if (!p) return
     setMlxContextLength(p.ctx)
     setReasoningParser(p.parser)
+    setToolCallParser(p.toolParser)
     setMlxModelType(p.modelType)
   }
 
@@ -90,6 +93,7 @@ export function LoadDialog({ model, onClose }: LoadDialogProps) {
       mlx_prompt_cache_size: isMLX ? promptCacheSize : undefined,
       mlx_enable_auto_tool_choice: isMLX ? enableAutoToolChoice : undefined,
       mlx_reasoning_parser: isMLX ? (reasoningParser || undefined) : undefined,
+      mlx_tool_call_parser: isMLX ? (toolCallParser || undefined) : undefined,
       mlx_chat_template_file: isMLX ? (chatTemplateFile || undefined) : undefined,
       mlx_trust_remote_code: isMLX ? trustRemoteCode : undefined,
       mlx_model_type: isMLX ? mlxModelType : undefined,
@@ -406,7 +410,30 @@ export function LoadDialog({ model, onClose }: LoadDialogProps) {
                       <option value="nemotron3_nano">Nemotron 3 Nano</option>
                     </select>
                     <p className="text-xs text-gray-500 mt-1">
-                      Parser for thinking/reasoning blocks. Auto-detect usually works.
+                      Parser for <thinking> blocks. Must pair with a Tool Call Parser below for structured tool calls.
+                    </p>
+                  </div>
+
+                  {/* Tool Call Parser */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-1">
+                      Tool Call Parser
+                    </label>
+                    <select
+                      value={toolCallParser}
+                      onChange={e => setToolCallParser(e.target.value)}
+                      className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    >
+                      <option value="">Disabled (no tool parser)</option>
+                      <option value="qwen3">Qwen 3</option>
+                      <option value="qwen3_coder">Qwen 3.5 / Qwen 3 Coder</option>
+                      <option value="hermes">Hermes</option>
+                      <option value="mistral">Mistral</option>
+                      <option value="llama">Llama</option>
+                      <option value="chatglm">ChatGLM</option>
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">
+                      REQUIRED for structured tool calls. Without this, raw {'<tool_call>'} XML leaks into reasoning content.
                     </p>
                   </div>
 

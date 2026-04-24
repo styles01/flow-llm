@@ -119,6 +119,7 @@ class BackendProcess:
         mlx_prompt_cache_size: int = 10,
         mlx_enable_auto_tool_choice: bool = False,
         mlx_reasoning_parser: str = "",
+        mlx_tool_call_parser: str = "",
         mlx_chat_template_file: str = "",
         mlx_trust_remote_code: bool = False,
         mlx_model_type: str = "lm",
@@ -140,6 +141,7 @@ class BackendProcess:
         self.mlx_prompt_cache_size = mlx_prompt_cache_size
         self.mlx_enable_auto_tool_choice = mlx_enable_auto_tool_choice
         self.mlx_reasoning_parser = mlx_reasoning_parser
+        self.mlx_tool_call_parser = mlx_tool_call_parser
         self.mlx_chat_template_file = mlx_chat_template_file
         self.mlx_trust_remote_code = mlx_trust_remote_code
         self.mlx_model_type = mlx_model_type
@@ -255,6 +257,8 @@ class BackendProcess:
                 cmd.append("--enable-auto-tool-choice")
             if self.mlx_reasoning_parser:
                 cmd.extend(["--reasoning-parser", self.mlx_reasoning_parser])
+            if self.mlx_tool_call_parser:
+                cmd.extend(["--tool-call-parser", self.mlx_tool_call_parser])
             if self.mlx_chat_template_file:
                 cmd.extend(["--chat-template-file", self.mlx_chat_template_file])
             if self.mlx_trust_remote_code:
@@ -422,6 +426,7 @@ class ProcessManager:
         mlx_prompt_cache_size: int = 10,
         mlx_enable_auto_tool_choice: bool = False,
         mlx_reasoning_parser: str = "",
+        mlx_tool_call_parser: str = "",
         mlx_chat_template_file: str = "",
         mlx_trust_remote_code: bool = False,
         mlx_model_type: str = "lm",
@@ -451,6 +456,7 @@ class ProcessManager:
             mlx_prompt_cache_size=mlx_prompt_cache_size,
             mlx_enable_auto_tool_choice=mlx_enable_auto_tool_choice,
             mlx_reasoning_parser=mlx_reasoning_parser,
+            mlx_tool_call_parser=mlx_tool_call_parser,
             mlx_chat_template_file=mlx_chat_template_file,
             mlx_trust_remote_code=mlx_trust_remote_code,
             mlx_model_type=mlx_model_type,

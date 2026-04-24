@@ -218,6 +218,7 @@ Prioritized implementation checklist.
 - [ ] TTFT not recorded for thinking models when no `content` delta arrives before context exhausted
 - [ ] Non-streaming proxy puts `<thinking>` in `content` not `reasoning_content` (streaming only splits correctly)
 - [x] ~~`mlx_enable_auto_tool_choice` defaulted to `False` causing Qwen 3.6 tool calls to embed in text~~ — fixed in `main.py` line 1018: auto-enables when `model.supports_tools=True`
+- [x] ~~Missing `--tool-call-parser` caused raw `<tool_call>` XML to stay in `reasoning_content` with no structured `tool_calls` JSON~~ — added `mlx_tool_call_parser` to `process_manager.py`, `main.py`, `LoadDialog.tsx`, `client.ts`, `ModelConfigDrawer.tsx`; auto-selects `qwen3`/`qwen3_coder` by default
 
 ### Future
 - [ ] Multi-machine network routing

@@ -229,7 +229,8 @@ export default function ModelConfigDrawer({ modelId, modelName, onClose }: Props
                 {loadParams.backend?.toUpperCase()}
                 {loadParams.ctx_size ? ` · ${loadParams.ctx_size.toLocaleString()} ctx` : ''}
                 {loadParams.n_parallel ? ` · ${loadParams.n_parallel} slots` : ''}
-                {loadParams.mlx_reasoning_parser ? ` · parser: ${loadParams.mlx_reasoning_parser}` : ''}
+                {loadParams.mlx_reasoning_parser ? ` · reasoning: ${loadParams.mlx_reasoning_parser}` : ''}
+                {loadParams.mlx_tool_call_parser ? ` · tools: ${loadParams.mlx_tool_call_parser}` : ''}
               </p>
             )}
           </div>

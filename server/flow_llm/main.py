@@ -123,6 +123,7 @@ class ModelLoadRequest(BaseModel):
     mlx_prompt_cache_size: int = 10
     mlx_enable_auto_tool_choice: bool = False
     mlx_reasoning_parser: str = ""
+    mlx_tool_call_parser: str = ""
     mlx_chat_template_file: str = ""
     mlx_trust_remote_code: bool = False
     mlx_model_type: str = "lm"  # "lm" | "multimodal"
@@ -1003,11 +1004,22 @@ async def load_model(model_id: str, request: ModelLoadRequest):
         session.commit()
 
         try:
+            # Auto-select tool-call-parser if empty but model supports tools
+            tool_call_parser = request.mlx_tool_call_parser
+            if not tool_call_parser and model.supports_tools is True:
+                rp = (request.mlx_reasoning_parser or "").lower()
+                name = model_id.lower()
+                if "qwen" in name or "qwen" in rp:
+                    if "3.5" in name or "3.5" in rp:
+                        tool_call_parser = "qwen3_coder"
+                    else:
+                        tool_call_parser = "qwen3"
+
             proc = await process_manager.start_model(
                 model_id=model_id,
                 backend=model.backend,
                 model_path=model_path,
-                ctx_size=request.ctx_size * request.n_parallel,  # Multiply by parallel slots
+                ctx_size=request.ctx_size * request.n_parallel,
                 flash_attn=request.flash_attn,
                 cache_type_k=request.cache_type_k,
                 cache_type_v=request.cache_type_v,
@@ -1017,6 +1029,7 @@ async def load_model(model_id: str, request: ModelLoadRequest):
                 mlx_prompt_cache_size=request.mlx_prompt_cache_size,
                 mlx_enable_auto_tool_choice=request.mlx_enable_auto_tool_choice or (model.supports_tools is True),
                 mlx_reasoning_parser=request.mlx_reasoning_parser,
+                mlx_tool_call_parser=tool_call_parser,
                 mlx_chat_template_file=request.mlx_chat_template_file,
                 mlx_trust_remote_code=request.mlx_trust_remote_code,
                 mlx_model_type=request.mlx_model_type,
@@ -1105,6 +1118,7 @@ async def get_model_config(model_id: str):
             "n_parallel": getattr(proc, "n_parallel", None),
             "mlx_context_length": getattr(proc, "mlx_context_length", None),
             "mlx_reasoning_parser": getattr(proc, "mlx_reasoning_parser", None),
+            "mlx_tool_call_parser": getattr(proc, "mlx_tool_call_parser", None),
             "mlx_model_type": getattr(proc, "mlx_model_type", None),
         }
     return {"config": _model_configs.get(model_id, {}), "load_params": load_params}

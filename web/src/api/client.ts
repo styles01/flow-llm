@@ -192,6 +192,7 @@ export interface ModelConfigResponse {
     n_parallel: number | null
     mlx_context_length: number | null
     mlx_reasoning_parser: string | null
+    mlx_tool_call_parser: string | null
     mlx_model_type: string | null
   }
 }
@@ -212,7 +213,7 @@ export const api = {
   loadModel: (id: string, opts?: {
     ctx_size?: number; flash_attn?: string; cache_type_k?: string; cache_type_v?: string; gpu_layers?: number; n_parallel?: number;
     mlx_context_length?: number; mlx_prompt_cache_size?: number; mlx_enable_auto_tool_choice?: boolean;
-    mlx_reasoning_parser?: string; mlx_chat_template_file?: string; mlx_trust_remote_code?: boolean;
+    mlx_reasoning_parser?: string; mlx_tool_call_parser?: string; mlx_chat_template_file?: string; mlx_trust_remote_code?: boolean;
     mlx_model_type?: string;
   }) =>
     fetchAPI<{ model_id: string; status: string; port: number; base_url: string }>(`/models/${encodeURIComponent(id)}/load`, {
