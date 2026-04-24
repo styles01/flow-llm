@@ -1,0 +1,48 @@
+{% if messages[0]['role'] == 'system' %}
+    {% set system_message = messages[0]['content'] %}
+    {% set loop_messages = messages[1:] %}
+{% else %}
+    {% set loop_messages = messages %}
+{% endif %}
+
+{% if system_message is defined %}
+    {{- '<|im_start|>system\n' + system_message }}
+{% endif %}
+
+{% if tools is defined and tools|length > 0 %}
+    {{- '\n\n# Tools\n\nYou have access to the following functions. ONLY call functions by using the exact format shown below:\n' }}
+    {% for tool in tools %}
+        {% if tool.function is defined %}
+            {% set tool = tool.function %}
+        {% endif %}
+        {{- '\nFunction: ' + tool.name }}
+        {{- '\nDescription: ' + (tool.description | default('')) }}
+        {{- '\nParameters: ' + (tool.parameters | tojson | safe) }}
+    {% endfor %}
+    {{- '\n\nWhen calling a function, your response MUST be ONLY:\n<tool_call>{"name": "function_name", "arguments": {"arg1": "value1"}}</tool_call>\n' }}
+    {{- '\n<IMPORTANT>\n- No other text before or after the <tool_call> block\n- Do NOT explain your reasoning\n- Do NOT describe what you are doing\n- Output ONLY the <tool_call> tag with valid JSON inside\n</IMPORTANT>' }}
+{% endif %}
+
+{% if system_message is defined %}
+    {{- '<|im_end|>\n' }}
+{% endif %}
+
+{% for message in loop_messages %}
+    {% if message.role == 'assistant' and message.tool_calls is defined %}
+        {{- '<|im_start|>assistant\n' }}
+        {% for tc in message.tool_calls %}
+            {{- '<tool_call>' + (tc.function | tojson | safe) + '</tool_call>' }}
+        {% endfor %}
+        {{- '<|im_end|>\n' }}
+    {% elif message.role == 'tool' %}
+        {{- '<|im_start|>user\n' }}
+        {{- '<tool_response>' + message.content + '</tool_response>' }}
+        {{- '<|im_end|>\n' }}
+    {% else %}
+        {{- '<|im_start|>' + message.role + '\n' + message.content + '<|im_end|>\n' }}
+    {% endif %}
+{% endfor %}
+
+{% if add_generation_prompt %}
+    {{- '<|im_start|>assistant\n' }}
+{% endif %}
