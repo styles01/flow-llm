@@ -41,7 +41,7 @@ export function LoadDialog({ model, onClose }: LoadDialogProps) {
   const [mlxModelType, setMlxModelType] = useState('lm')
 
   const MLX_PRESETS: Record<string, { label: string; ctx: number; parser: string; toolParser: string; modelType: string }> = {
-    qwen3_thinking: { label: 'Qwen3 / Qwen3.6 — Thinking + Tools', ctx: 262144, parser: 'qwen3_vl', toolParser: 'qwen3', modelType: 'lm' },
+    qwen3_thinking: { label: 'Qwen3 / Qwen3.6 — Thinking + Tools', ctx: 262144, parser: 'qwen3', toolParser: 'hermes', modelType: 'lm' },
     qwen35_thinking: { label: 'Qwen3.5 — Thinking + Tools', ctx: 262144, parser: 'qwen3_5', toolParser: 'qwen3_coder', modelType: 'multimodal' },
     qwen3_notthinking: { label: 'Qwen3 / Qwen3.6 — No Thinking', ctx: 262144, parser: '', toolParser: '', modelType: 'lm' },
     default: { label: 'Default (no preset)', ctx: 0, parser: '', toolParser: '', modelType: 'lm' },
