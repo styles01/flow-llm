@@ -129,6 +129,60 @@ BUILTIN_PRESETS = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Tool-call rescue helpers (module-level so both /v1/chat/completions and
+# /v1/messages handlers can use them)
+# ---------------------------------------------------------------------------
+_TC_RE = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
+
+
+def _parse_tc_json(raw: str) -> dict | None:
+    """Parse tool-call JSON, repairing common truncation (missing closing braces)."""
+    raw = raw.strip()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+    for suffix in ("}", "}}", "}}}"):
+        try:
+            return json.loads(raw + suffix)
+        except json.JSONDecodeError:
+            pass
+    return None
+
+
+def _rescue_tool_calls(result: dict) -> dict:
+    """If backend returned <tool_call> XML in message.content instead of tool_calls[],
+    extract and promote them.  Handles malformed/truncated JSON via _parse_tc_json."""
+    choices = result.get("choices", [])
+    new_choices = []
+    changed = False
+    for choice in choices:
+        msg = choice.get("message", {})
+        content = msg.get("content") or ""
+        if msg.get("tool_calls") is None and "<tool_call>" in content:
+            matches = _TC_RE.findall(content)
+            parsed: list = []
+            for m in matches:
+                td = _parse_tc_json(m)
+                if td and td.get("name"):
+                    parsed.append({
+                        "id": f"call_{uuid.uuid4().hex[:16]}",
+                        "type": "function",
+                        "function": {
+                            "name": td["name"],
+                            "arguments": json.dumps(td.get("arguments", {})),
+                        },
+                    })
+            if parsed:
+                new_msg = {**msg, "content": "", "tool_calls": parsed}
+                new_choices.append({**choice, "message": new_msg, "finish_reason": "tool_calls"})
+                changed = True
+                continue
+        new_choices.append(choice)
+    return {**result, "choices": new_choices} if changed else result
+
+
 # --- Pydantic models ---
 
 
@@ -1593,7 +1647,7 @@ async def anthropic_messages(request: dict):
         return _anthropic_error_response(status_code, error_type, message, anthro_request_id)
 
     try:
-        result = response.json()
+        result = _rescue_tool_calls(response.json())
         anthropic_result = to_anthropic_response(result, model_name)
     except (ValueError, AnthropicRequestError) as exc:
         message = exc.message if isinstance(exc, AnthropicRequestError) else f"Failed to decode backend response: {exc}"
@@ -1697,59 +1751,6 @@ async def chat_completions(request: dict):
             _ctk.update(_cfg["chat_template_kwargs"])
             _extra["chat_template_kwargs"] = _ctk
             req_body["extra_body"] = _extra
-
-    # ---------------------------------------------------------------------------
-    # Helper: rescue <tool_call> tags stranded in message.content
-    # ---------------------------------------------------------------------------
-    # When the model skips <think>...</think> and goes straight to <tool_call>,
-    # the reasoning parser returns {"content": "<tool_call>..."} without ever
-    # calling the tool parser.  We catch this in the proxy and extract tool calls
-    # from content ourselves so Hermes always gets tool_calls[] + finish_reason=tool_calls.
-    _TC_RE = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
-
-    def _parse_tc_json(raw: str) -> dict | None:
-        """Parse tool-call JSON, repairing common truncation (missing closing braces)."""
-        raw = raw.strip()
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError:
-            pass
-        # Model sometimes truncates the JSON by omitting 1-3 closing braces
-        for suffix in ("}", "}}", "}}}"):
-            try:
-                return json.loads(raw + suffix)
-            except json.JSONDecodeError:
-                pass
-        return None
-
-    def _rescue_tool_calls(result: dict) -> dict:
-        choices = result.get("choices", [])
-        new_choices = []
-        changed = False
-        for choice in choices:
-            msg = choice.get("message", {})
-            content = msg.get("content") or ""
-            if msg.get("tool_calls") is None and "<tool_call>" in content:
-                matches = _TC_RE.findall(content)
-                parsed: list = []
-                for m in matches:
-                    td = _parse_tc_json(m)
-                    if td and td.get("name"):
-                        parsed.append({
-                            "id": f"call_{uuid.uuid4().hex[:16]}",
-                            "type": "function",
-                            "function": {
-                                "name": td["name"],
-                                "arguments": json.dumps(td.get("arguments", {})),
-                            },
-                        })
-                if parsed:
-                    new_msg = {**msg, "content": "", "tool_calls": parsed}
-                    new_choices.append({**choice, "message": new_msg, "finish_reason": "tool_calls"})
-                    changed = True
-                    continue
-            new_choices.append(choice)
-        return {**result, "choices": new_choices} if changed else result
 
     # Workaround: mlx-openai-server's multimodal handler (mlx_vlm.py) crashes when
     # assistant messages have null content (which happens after tool_calls turns).
