@@ -1678,6 +1678,134 @@ async def chat_completions(request: dict):
         req_body = {**req_body, "messages": _patched_msgs}
 
     if req_body.get("stream", False):
+        # -----------------------------------------------------------------------
+        # Streaming + tools workaround
+        # -----------------------------------------------------------------------
+        # mlx-openai-server's streaming path has a bug: when a reasoning_parser is
+        # active, every chunk goes through the reasoning loop first.  If the model
+        # never emits <think> (or emits it in one chunk and the close tag lands in
+        # the same chunk), the loop does `continue` before the tool_parser block is
+        # reached — so <tool_call> tags leak into `content` forever and
+        # finish_reason stays "stop" instead of "tool_calls".
+        #
+        # Workaround: when the request carries tools, silently convert to
+        # non-streaming (which parses correctly), then re-emit the complete
+        # response as a minimal SSE stream so Hermes/OpenClaw see a streaming
+        # interface.
+        # -----------------------------------------------------------------------
+        if req_body.get("tools"):
+            ns_body = {**req_body, "stream": False}
+            request_input_estimate = _estimate_input_tokens(req_body)
+
+            async def stream_tool_calls_via_nonstreaming():
+                client = httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=600.0, write=30.0, pool=30.0))
+                try:
+                    resp = await client.post(
+                        f"{backend_url}/v1/chat/completions",
+                        json=ns_body,
+                        headers={"Content-Type": "application/json"},
+                    )
+                    result = resp.json()
+                except Exception as exc:
+                    error_request(track_id, str(exc))
+                    yield f"data: {json.dumps({'error': str(exc)})}\n\ndata: [DONE]\n\n"
+                    return
+                finally:
+                    await client.aclose()
+
+                end_time = time.monotonic()
+
+                # Record telemetry from non-streaming result
+                usage = result.get("usage", {})
+                input_tokens = usage.get("prompt_tokens") or request_input_estimate
+                output_tokens = usage.get("completion_tokens")
+                total_tokens = usage.get("total_tokens")
+                ttft_ms = (end_time - start_time) * 1000
+                tokens_per_sec = output_tokens / (end_time - start_time) if output_tokens and (end_time > start_time) else None
+                complete_request(track_id, output_tokens=output_tokens or 0, input_tokens=input_tokens, tokens_per_sec=tokens_per_sec)
+                await _record_telemetry(
+                    model_id=model_name,
+                    backend=proc.backend,
+                    ttft_ms=ttft_ms,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=total_tokens,
+                    tokens_per_sec=tokens_per_sec,
+                )
+
+                # Convert the complete response into SSE chunks.
+                # Emit: role chunk → tool_calls / content chunk → finish chunk → [DONE]
+                completion_id = result.get("id", "chatcmpl-proxy")
+                created = result.get("created", int(time.time()))
+                model_out = result.get("model", model_name)
+                choices = result.get("choices", [])
+
+                # Chunk 1: role delta
+                role_chunk = {
+                    "id": completion_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": model_out,
+                    "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": None}],
+                }
+                yield f"data: {json.dumps(role_chunk)}\n\n"
+
+                for choice in choices:
+                    msg = choice.get("message", {})
+                    finish_reason = choice.get("finish_reason", "stop")
+                    idx = choice.get("index", 0)
+
+                    # Chunk 2a: reasoning_content if present
+                    if msg.get("reasoning_content"):
+                        reasoning_chunk = {
+                            "id": completion_id,
+                            "object": "chat.completion.chunk",
+                            "created": created,
+                            "model": model_out,
+                            "choices": [{"index": idx, "delta": {"reasoning_content": msg["reasoning_content"]}, "finish_reason": None}],
+                        }
+                        yield f"data: {json.dumps(reasoning_chunk)}\n\n"
+
+                    # Chunk 2b: tool_calls or content
+                    tool_calls = msg.get("tool_calls")
+                    content = msg.get("content") or ""
+                    if tool_calls:
+                        tc_chunk = {
+                            "id": completion_id,
+                            "object": "chat.completion.chunk",
+                            "created": created,
+                            "model": model_out,
+                            "choices": [{"index": idx, "delta": {"tool_calls": tool_calls}, "finish_reason": None}],
+                        }
+                        yield f"data: {json.dumps(tc_chunk)}\n\n"
+                    elif content:
+                        content_chunk = {
+                            "id": completion_id,
+                            "object": "chat.completion.chunk",
+                            "created": created,
+                            "model": model_out,
+                            "choices": [{"index": idx, "delta": {"content": content}, "finish_reason": None}],
+                        }
+                        yield f"data: {json.dumps(content_chunk)}\n\n"
+
+                    # Chunk 3: finish chunk
+                    finish_chunk = {
+                        "id": completion_id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": model_out,
+                        "choices": [{"index": idx, "delta": {}, "finish_reason": finish_reason}],
+                        "usage": usage,
+                    }
+                    yield f"data: {json.dumps(finish_chunk)}\n\n"
+
+                yield "data: [DONE]\n\n"
+
+            return StreamingResponse(
+                stream_tool_calls_via_nonstreaming(),
+                media_type="text/event-stream",
+            )
+
         # Streaming response — client must outlive the generator
         # Estimate input tokens from request messages as a fallback
         request_input_estimate = _estimate_input_tokens(req_body)
