@@ -135,20 +135,28 @@ BUILTIN_PRESETS = [
 _TC_RE = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
 # Matches an unclosed <tool_call> — model truncated before </tool_call>
 _TC_OPEN_RE = re.compile(r"<tool_call>(.*?)$", re.DOTALL)
+# Extracts just the name field as a last-resort fallback
+_TC_NAME_RE = re.compile(r'"name"\s*:\s*"([^"]+)"')
 
 
 def _parse_tc_json(raw: str) -> dict | None:
-    """Parse tool-call JSON, repairing common truncation (missing closing braces)."""
+    """Parse tool-call JSON, repairing common truncation (missing closing braces/quotes).
+    Falls back to regex name extraction if JSON is unrecoverable."""
     raw = raw.strip()
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
         pass
-    for suffix in ("}", "}}", "}}}", '"}', '"}}', '"}}}'):
+    # Try appending common missing suffixes (closed brace, quoted string + brace)
+    for suffix in ("}", "}}", "}}}", '"}', '"}}', '"}}}', '"}]}', '"]}'):
         try:
             return json.loads(raw + suffix)
         except json.JSONDecodeError:
             pass
+    # Last resort: extract name via regex, return with empty arguments
+    m = _TC_NAME_RE.search(raw)
+    if m:
+        return {"name": m.group(1), "arguments": {}}
     return None
 
 
@@ -1804,6 +1812,15 @@ async def chat_completions(request: dict):
         # -----------------------------------------------------------------------
         if req_body.get("tools"):
             ns_body = {**req_body, "stream": False}
+            # When a reasoning parser is active, the model's <think>...</think>
+            # tokens count against max_tokens but are stripped from the response.
+            # If Hermes/OpenClaw sends a low max_tokens (e.g. 4096), thinking burns
+            # through the budget leaving only a few tokens for the actual response
+            # ("Alright, James", "The", etc.).
+            # Fix: drop max_tokens when a reasoning parser is active — the context
+            # window (262K) is the real cap, so this is safe.
+            if proc.mlx_reasoning_parser and "max_tokens" in ns_body:
+                ns_body = {k: v for k, v in ns_body.items() if k != "max_tokens"}
             request_input_estimate = _estimate_input_tokens(req_body)
 
             async def stream_tool_calls_via_nonstreaming():
@@ -2006,6 +2023,10 @@ async def chat_completions(request: dict):
         )
     else:
         # Non-streaming response — use long timeout for deep thinking/reasoning
+        # Drop max_tokens when a reasoning parser is active so thinking tokens don't
+        # eat the client's budget before the actual response begins.
+        if proc.mlx_reasoning_parser and "max_tokens" in req_body:
+            req_body = {k: v for k, v in req_body.items() if k != "max_tokens"}
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=600.0, write=30.0, pool=30.0)) as client:
                 response = await client.post(
