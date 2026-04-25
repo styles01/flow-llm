@@ -39,7 +39,50 @@ The template used `{% if tools is defined and tools|length > 0 %}`. When `tools`
 
 **Fix:** Changed to `{% if tools %}` — safely handles `None`, undefined, and empty list.
 
-### Issue 3 — Multimodal round-trip crash
+### Issue 3 — Tool-call round-trips crash with `peak_memory` AttributeError
+
+**Symptom:** After a successful tool call, the model's follow-up response (tool result → final answer) crashes with:
+
+```
+Error in multimodal response generation: 'NoneType' object has no attribute 'peak_memory'
+POST /v1/chat/completions HTTP/1.1" 500 Internal Server Error
+```
+
+This causes OpenClaw/Hermes to see an empty response and emit "nudging to continue" retries. It works intermittently (sometimes `peak_memory` is populated, sometimes not), which looks like tool calling is "sort of working."
+
+**Root cause:** In `app/models/mlx_vlm.py` the response collector loop only updates `final_chunk` when `chunk.text` is truthy:
+
+```python
+final_chunk = None
+for chunk in response_generator:
+    if chunk and chunk.text:       # ← skips chunks with empty text
+        text += chunk.text
+        tokens.append(chunk.token)
+        final_chunk = chunk        # ← never set for tool-call responses!
+# final_chunk is still None here for tool calls
+return CompletionResponse(peak_memory=final_chunk.peak_memory, ...)  # AttributeError
+```
+
+Tool-call responses have `content: ""` — all chunks have empty text — so `final_chunk` stays `None`.
+
+**Fix (site-packages patch):** Track `final_chunk` for all non-None chunks regardless of text content:
+
+```python
+for chunk in response_generator:
+    if chunk:
+        final_chunk = chunk        # always update for metadata
+        if chunk.text:
+            text += chunk.text
+            tokens.append(chunk.token)
+```
+
+Also added null guards in `app/handler/mlx_vlm.py` for both streaming and non-streaming paths (belt-and-suspenders):
+```python
+# was: final_chunk.peak_memory / response.peak_memory
+final_chunk.peak_memory if final_chunk.peak_memory is not None else 0.0
+```
+
+### Issue 4 — Multimodal round-trip crash (null content)
 
 When loading with `--model-type multimodal` (required for vision support), tool-call round-trips (sending the tool result back for a final answer) crashed with:
 
@@ -51,7 +94,7 @@ Root cause: `mlx_vlm.py` line 738 passes `message.content` directly for assistan
 
 **Fix:** The Flow proxy (`main.py`) now coerces `null` → `""` for any assistant message's `content` before forwarding to the backend. This allows multimodal mode + tool calling to coexist.
 
-### Issue 4 — Auto-select missing reasoning parser
+### Issue 5 — Auto-select missing reasoning parser
 
 When a Qwen model was loaded via the UI Load Dialog (or API without explicit `mlx_reasoning_parser`), the auto-select logic in `main.py` would set `tool_call_parser = "qwen3"` but leave `reasoning_parser` empty. Without the reasoning parser, the full `<think>...thinking...</think>` block leaked into `content`.
 
@@ -145,6 +188,8 @@ When replaying tool-call turns from conversation history (assistant message with
 - **Auto-select**: when `supports_tools=True` and model is Qwen, now auto-sets both `tool_call_parser="qwen3"` AND `reasoning_parser="qwen3"` (previously only set `tool_call_parser`)
 - **Null content fix**: proxy now coerces `assistant.content = null` → `""` before forwarding to multimodal backends, fixing the VLM round-trip crash
 - **Streaming + tools safety workaround**: when `stream=True` AND `tools` are present, the proxy converts to non-streaming (which always parses correctly), gets the complete response, then re-emits it as SSE. This guards against the `mlx_vlm.py` streaming path bug where the reasoning_parser `continue` bypasses the tool_parser. The template fix (Issue 1) already resolves the most common trigger; this is belt-and-suspenders.
+- **`_rescue_tool_calls()` at module level**: moved from local scope inside `chat_completions()` to module level so both the OpenAI (`/v1/chat/completions`) and Anthropic (`/v1/messages`) non-streaming handlers can call it. Includes `_parse_tc_json()` with truncated-JSON repair (retries appending `}`, `}}`, `}}}`) and `_TC_RE` regex.
+- **Prometheus metrics poll skipped for MLX**: `/api/model-activity` was polling `GET /metrics` on every backend every ~1s. mlx-openai-server doesn't implement `/metrics`, generating constant 404 spam. Fixed by skipping the poll when `proc.backend == "mlx"`.
 - **Per-model runtime config** (previous session): `_model_configs` in-memory dict, GET/PUT/DELETE `/api/models/{id}/config`
 - **Presets system** (previous session): built-in + user presets, full CRUD at `/api/presets`, saved to `~/.flow/presets.json`
 
@@ -160,6 +205,16 @@ Chat history is now persisted to `localStorage` (key: `flow_chat_session`). Surv
 
 ---
 
+### Site-packages patches (mlx-openai-server)
+
+These fix bugs in the installed `mlx-openai-server` package. They survive normal `flow` restarts but will be overwritten by a `pip install --upgrade mlx-openai-server`. Re-apply if you upgrade.
+
+**`app/models/mlx_vlm.py`** — Track `final_chunk` for all non-None chunks (Issue 3 fix above)
+
+**`app/handler/mlx_vlm.py`** — Null guard for `peak_memory` in both streaming (line ~440) and non-streaming (line ~580) `log_debug_stats()` calls.
+
+---
+
 ## Verified Test Results
 
 All via the Flow proxy at `http://localhost:3377/v1/chat/completions` (the OpenAI endpoint Hermes/OpenClaw uses):
@@ -171,6 +226,8 @@ All via the Flow proxy at `http://localhost:3377/v1/chat/completions` (the OpenA
 | First-turn tool call (streaming) | `finish_reason: tool_calls`, `tool_calls` in delta, no raw `<tool_call>` leak | ✅ |
 | Round-trip (tool result → answer, streaming) | `finish_reason: stop`, clean answer, no `</think>` leak | ✅ |
 | Parallel tool calls | Both tool calls extracted | ✅ |
+| Anthropic `/v1/messages` tool call | `tool_calls` block in `content`, `stop_reason: tool_use` | ✅ |
+| Long-context round-trip (48K+ tokens) | No `peak_memory` crash, stable response | ✅ |
 
 ---
 

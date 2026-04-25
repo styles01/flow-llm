@@ -2262,8 +2262,8 @@ async def model_activity():
                 "requests": get_requests_for_model(model_id),
             }
 
-            # Supplement with Prometheus metrics from llama-server
-            if port:
+            # Supplement with Prometheus metrics from llama-server (llama.cpp only)
+            if port and getattr(proc, "backend", None) != "mlx":
                 try:
                     resp = await client.get(f"http://127.0.0.1:{port}/metrics")
                     if resp.status_code == 200:

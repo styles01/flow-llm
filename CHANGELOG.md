@@ -2,6 +2,14 @@
 
 All notable changes to Flow LLM will be documented in this file.
 
+## [Unreleased] - 2026-04-25
+
+### Fixed
+- **`peak_memory` crash on tool-call round-trips** — root cause: `app/models/mlx_vlm.py` only tracked `final_chunk` when `chunk.text` was truthy; tool-call responses have `content: ""` so `final_chunk` stayed `None`, crashing with `'NoneType' object has no attribute 'peak_memory'` → 500 on every follow-up. Fix: track `final_chunk` for all non-None chunks regardless of text content.
+- **Null guard for `peak_memory` in handler** — belt-and-suspenders fix in `app/handler/mlx_vlm.py` for both streaming and non-streaming `log_debug_stats()` calls: `peak_memory if peak_memory is not None else 0.0`
+- **`/metrics` 404 spam** — `/api/model-activity` was polling `GET /metrics` (Prometheus) on every backend every ~1s; mlx-openai-server doesn't implement this endpoint. Fixed by skipping the poll for MLX backends.
+- **`_rescue_tool_calls()` unreachable from Anthropic path** — helpers were defined in local scope inside `chat_completions()` and unavailable to `/v1/messages`. Moved `_TC_RE`, `_parse_tc_json()`, and `_rescue_tool_calls()` to module level; wired rescue into the Anthropic non-streaming path.
+
 ## [Unreleased] - 2026-04-24
 
 ### Added
