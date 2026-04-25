@@ -144,6 +144,7 @@ When replaying tool-call turns from conversation history (assistant message with
 ### `server/flow_llm/main.py`
 - **Auto-select**: when `supports_tools=True` and model is Qwen, now auto-sets both `tool_call_parser="qwen3"` AND `reasoning_parser="qwen3"` (previously only set `tool_call_parser`)
 - **Null content fix**: proxy now coerces `assistant.content = null` → `""` before forwarding to multimodal backends, fixing the VLM round-trip crash
+- **Streaming + tools safety workaround**: when `stream=True` AND `tools` are present, the proxy converts to non-streaming (which always parses correctly), gets the complete response, then re-emits it as SSE. This guards against the `mlx_vlm.py` streaming path bug where the reasoning_parser `continue` bypasses the tool_parser. The template fix (Issue 1) already resolves the most common trigger; this is belt-and-suspenders.
 - **Per-model runtime config** (previous session): `_model_configs` in-memory dict, GET/PUT/DELETE `/api/models/{id}/config`
 - **Presets system** (previous session): built-in + user presets, full CRUD at `/api/presets`, saved to `~/.flow/presets.json`
 
@@ -166,8 +167,9 @@ All via the Flow proxy at `http://localhost:3377/v1/chat/completions` (the OpenA
 | Test | Expected | Result |
 |------|----------|--------|
 | Plain chat (no tools) | `finish_reason: stop`, thinking in `reasoning_content`, clean `content` | ✅ |
-| First-turn tool call | `finish_reason: tool_calls`, `content: ""`, proper `tool_calls` array | ✅ |
-| Round-trip (tool result → answer) | `finish_reason: stop`, clean answer, no `</think>` leak | ✅ |
+| First-turn tool call (non-streaming) | `finish_reason: tool_calls`, `content: ""`, proper `tool_calls` array | ✅ |
+| First-turn tool call (streaming) | `finish_reason: tool_calls`, `tool_calls` in delta, no raw `<tool_call>` leak | ✅ |
+| Round-trip (tool result → answer, streaming) | `finish_reason: stop`, clean answer, no `</think>` leak | ✅ |
 | Parallel tool calls | Both tool calls extracted | ✅ |
 
 ---
