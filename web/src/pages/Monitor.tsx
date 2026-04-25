@@ -222,25 +222,41 @@ export default function MonitorPage() {
         />
       ) : (
         <div className="space-y-3">
-          {models.map((m) => (
-            <div key={m.model_id} className="bg-gray-900 border border-teal-800/50 rounded-lg p-4">
+          {models.map((m) => {
+            const warming = !m.backend_ready
+            return (
+            <div key={m.model_id} className={`bg-gray-900 border rounded-lg p-4 ${warming ? 'border-amber-700/50' : 'border-teal-800/50'}`}>
               <div className="flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+                    {warming
+                      ? <span className="w-2 h-2 bg-amber-400 rounded-full animate-pulse" />
+                      : <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+                    }
                     <p className="font-medium">{m.name}</p>
                     <span className={`px-1.5 py-0.5 rounded text-xs font-mono ${
                       m.backend === 'gguf' ? 'bg-blue-900/50 text-blue-300' : 'bg-purple-900/50 text-purple-300'
                     }`}>{m.backend}</span>
+                    {warming && (
+                      <span className="px-1.5 py-0.5 rounded text-xs bg-amber-900/40 text-amber-300 animate-pulse">
+                        warming up…
+                      </span>
+                    )}
                   </div>
                   <p className="text-sm text-gray-400 mt-1">
                     Port {m.port} · PID {m.pid} · {m.base_url}
                   </p>
+                  {warming && (
+                    <p className="text-xs text-amber-500/70 mt-1">
+                      Loading model weights into memory — requests will queue until ready
+                    </p>
+                  )}
                 </div>
                 <div className="flex gap-2">
                   <button
                     onClick={() => setDrawerModel({ id: m.model_id, name: m.name })}
                     className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-sm"
+                    disabled={warming}
                   >
                     Configure
                   </button>
@@ -260,12 +276,15 @@ export default function MonitorPage() {
                   </button>
                 </div>
               </div>
-              <RequestPipeline
-                modelId={m.model_id}
-                activity={activityData?.activity[m.model_id]}
-              />
+              {!warming && (
+                <RequestPipeline
+                  modelId={m.model_id}
+                  activity={activityData?.activity[m.model_id]}
+                />
+              )}
             </div>
-          ))}
+            )
+          })}
         </div>
       )}
 

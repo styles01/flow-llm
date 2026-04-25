@@ -48,6 +48,7 @@ export interface RunningModel {
   base_url: string;
   pid: number | null;
   is_running: boolean;
+  backend_ready: boolean;
 }
 
 export interface HFSearchResult {

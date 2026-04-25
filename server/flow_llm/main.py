@@ -499,6 +499,16 @@ async def list_models():
         session.close()
 
 
+async def _check_backend_ready(base_url: str) -> bool:
+    """Check if the backend HTTP server is actually accepting requests."""
+    try:
+        async with httpx.AsyncClient(timeout=1.0) as client:
+            r = await client.get(f"{base_url}/v1/models")
+            return r.status_code == 200
+    except Exception:
+        return False
+
+
 @app.get("/api/models/running")
 async def list_running_models():
     """List all currently running models with live status."""
@@ -510,6 +520,7 @@ async def list_running_models():
     try:
         for model_id, proc in processes.items():
             model = session.query(Model).filter(Model.id == model_id).first()
+            backend_ready = await _check_backend_ready(proc.base_url)
             result.append({
                 "model_id": model_id,
                 "name": model.name if model else model_id,
@@ -518,6 +529,7 @@ async def list_running_models():
                 "base_url": proc.base_url + "/v1",
                 "pid": proc.get_pid(),
                 "is_running": proc.is_running(),
+                "backend_ready": backend_ready,
             })
     finally:
         session.close()

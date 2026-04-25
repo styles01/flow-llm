@@ -418,7 +418,7 @@ export function LoadDialog({ model, onClose }: LoadDialogProps) {
                       <option value="nemotron3_nano">Nemotron 3 Nano</option>
                     </select>
                     <p className="text-xs text-gray-500 mt-1">
-                      Parser for <thinking> blocks. Must pair with a Tool Call Parser below for structured tool calls.
+                      Parser for &lt;thinking&gt; blocks. Must pair with a Tool Call Parser below for structured tool calls.
                     </p>
                   </div>
 
