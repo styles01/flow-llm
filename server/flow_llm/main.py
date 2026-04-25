@@ -1707,6 +1707,21 @@ async def chat_completions(request: dict):
     # from content ourselves so Hermes always gets tool_calls[] + finish_reason=tool_calls.
     _TC_RE = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
 
+    def _parse_tc_json(raw: str) -> dict | None:
+        """Parse tool-call JSON, repairing common truncation (missing closing braces)."""
+        raw = raw.strip()
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            pass
+        # Model sometimes truncates the JSON by omitting 1-3 closing braces
+        for suffix in ("}", "}}", "}}}"):
+            try:
+                return json.loads(raw + suffix)
+            except json.JSONDecodeError:
+                pass
+        return None
+
     def _rescue_tool_calls(result: dict) -> dict:
         choices = result.get("choices", [])
         new_choices = []
@@ -1718,18 +1733,16 @@ async def chat_completions(request: dict):
                 matches = _TC_RE.findall(content)
                 parsed: list = []
                 for m in matches:
-                    try:
-                        td = json.loads(m.strip())
+                    td = _parse_tc_json(m)
+                    if td and td.get("name"):
                         parsed.append({
                             "id": f"call_{uuid.uuid4().hex[:16]}",
                             "type": "function",
                             "function": {
-                                "name": td.get("name", ""),
+                                "name": td["name"],
                                 "arguments": json.dumps(td.get("arguments", {})),
                             },
                         })
-                    except Exception:
-                        pass
                 if parsed:
                     new_msg = {**msg, "content": "", "tool_calls": parsed}
                     new_choices.append({**choice, "message": new_msg, "finish_reason": "tool_calls"})
