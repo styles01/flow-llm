@@ -133,6 +133,8 @@ BUILTIN_PRESETS = [
 # /v1/messages handlers can use them)
 # ---------------------------------------------------------------------------
 _TC_RE = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
+# Matches an unclosed <tool_call> — model truncated before </tool_call>
+_TC_OPEN_RE = re.compile(r"<tool_call>(.*?)$", re.DOTALL)
 
 
 def _parse_tc_json(raw: str) -> dict | None:
@@ -142,7 +144,7 @@ def _parse_tc_json(raw: str) -> dict | None:
         return json.loads(raw)
     except json.JSONDecodeError:
         pass
-    for suffix in ("}", "}}", "}}}"):
+    for suffix in ("}", "}}", "}}}", '"}', '"}}', '"}}}'):
         try:
             return json.loads(raw + suffix)
         except json.JSONDecodeError:
@@ -152,7 +154,11 @@ def _parse_tc_json(raw: str) -> dict | None:
 
 def _rescue_tool_calls(result: dict) -> dict:
     """If backend returned <tool_call> XML in message.content instead of tool_calls[],
-    extract and promote them.  Handles malformed/truncated JSON via _parse_tc_json."""
+    extract and promote them.  Handles:
+    - Closed tags: <tool_call>...</tool_call>
+    - Truncated tags: <tool_call>... (no closing tag — model cut off)
+    - Truncated JSON: missing 1-3 closing braces
+    """
     choices = result.get("choices", [])
     new_choices = []
     changed = False
@@ -160,7 +166,12 @@ def _rescue_tool_calls(result: dict) -> dict:
         msg = choice.get("message", {})
         content = msg.get("content") or ""
         if msg.get("tool_calls") is None and "<tool_call>" in content:
+            # First try closed tags
             matches = _TC_RE.findall(content)
+            # Fall back to unclosed (truncated) if none found
+            if not matches and not _TC_RE.search(content):
+                unclosed = _TC_OPEN_RE.findall(content)
+                matches = unclosed
             parsed: list = []
             for m in matches:
                 td = _parse_tc_json(m)
