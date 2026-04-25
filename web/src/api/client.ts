@@ -177,11 +177,27 @@ export interface ModelConfig {
   chat_template_kwargs?: Record<string, unknown>
 }
 
+export interface PresetLoadParams {
+  mlx_context_length?: number
+  mlx_prompt_cache_size?: number
+  mlx_enable_auto_tool_choice?: boolean
+  mlx_reasoning_parser?: string
+  mlx_tool_call_parser?: string
+  mlx_model_type?: string
+  mlx_chat_template_file?: string
+  mlx_trust_remote_code?: boolean
+  ctx_size?: number
+  n_parallel?: number
+  flash_attn?: string
+  gpu_layers?: number
+}
+
 export interface Preset {
   id: string
   name: string
   builtin: boolean
   config: ModelConfig
+  load_params?: PresetLoadParams
 }
 
 export interface ModelConfigResponse {

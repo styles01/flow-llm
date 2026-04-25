@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api, type ModelInfo } from '../api/client'
+import { api, type ModelInfo, type Preset } from '../api/client'
 
 interface LoadDialogProps {
   model: ModelInfo
@@ -15,6 +15,10 @@ export function LoadDialog({ model, onClose }: LoadDialogProps) {
 
   // Fetch saved defaults
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: () => api.getSettings() })
+
+  // Fetch presets (for load_params presets)
+  const { data: presetsData } = useQuery({ queryKey: ['presets'], queryFn: () => api.listPresets() })
+  const loadPresets: Preset[] = (presetsData?.presets ?? []).filter(p => p.load_params)
 
   // --- GGUF params ---
   const [ctxSize, setCtxSize] = useState(settings?.default_ctx_size ?? 100000)
@@ -40,20 +44,19 @@ export function LoadDialog({ model, onClose }: LoadDialogProps) {
   const [trustRemoteCode, setTrustRemoteCode] = useState(false)
   const [mlxModelType, setMlxModelType] = useState('lm')
 
-  const MLX_PRESETS: Record<string, { label: string; ctx: number; parser: string; toolParser: string; modelType: string }> = {
-    qwen3_thinking: { label: 'Qwen3 / Qwen3.6 — Thinking + Tools', ctx: 262144, parser: 'qwen3', toolParser: 'hermes', modelType: 'lm' },
-    qwen35_thinking: { label: 'Qwen3.5 — Thinking + Tools', ctx: 262144, parser: 'qwen3_5', toolParser: 'qwen3_coder', modelType: 'multimodal' },
-    qwen3_notthinking: { label: 'Qwen3 / Qwen3.6 — No Thinking', ctx: 262144, parser: '', toolParser: '', modelType: 'lm' },
-    default: { label: 'Default (no preset)', ctx: 0, parser: '', toolParser: '', modelType: 'lm' },
-  }
-
-  function applyPreset(key: string) {
-    const p = MLX_PRESETS[key]
-    if (!p) return
-    setMlxContextLength(p.ctx)
-    setReasoningParser(p.parser)
-    setToolCallParser(p.toolParser)
-    setMlxModelType(p.modelType)
+  function applyLoadPreset(preset: Preset) {
+    const lp = preset.load_params
+    if (!lp) return
+    if (lp.mlx_context_length != null) setMlxContextLength(lp.mlx_context_length)
+    if (lp.mlx_prompt_cache_size != null) setPromptCacheSize(lp.mlx_prompt_cache_size)
+    if (lp.mlx_enable_auto_tool_choice != null) setEnableAutoToolChoice(lp.mlx_enable_auto_tool_choice)
+    if (lp.mlx_reasoning_parser != null) setReasoningParser(lp.mlx_reasoning_parser)
+    if (lp.mlx_tool_call_parser != null) setToolCallParser(lp.mlx_tool_call_parser)
+    if (lp.mlx_model_type != null) setMlxModelType(lp.mlx_model_type)
+    if (lp.mlx_chat_template_file != null) setChatTemplateFile(lp.mlx_chat_template_file)
+    if (lp.mlx_trust_remote_code != null) setTrustRemoteCode(lp.mlx_trust_remote_code)
+    if (lp.ctx_size != null) setCtxSize(lp.ctx_size)
+    if (lp.n_parallel != null) setNParallel(lp.n_parallel)
   }
 
   // --- Common ---
@@ -314,25 +317,30 @@ export function LoadDialog({ model, onClose }: LoadDialogProps) {
 
           {isMLX && (
             <>
-              {/* Preset */}
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">
-                  Preset
-                </label>
-                <select
-                  onChange={e => applyPreset(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
-                  defaultValue=""
-                >
-                  <option value="">— select a preset —</option>
-                  {Object.entries(MLX_PRESETS).map(([k, p]) => (
-                    <option key={k} value={k}>{p.label}</option>
-                  ))}
-                </select>
-                <p className="text-xs text-gray-500 mt-1">
-                  Apply recommended settings for a specific model family
-                </p>
-              </div>
+              {/* Load Preset */}
+              {loadPresets.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    Load Preset
+                  </label>
+                  <select
+                    onChange={e => {
+                      const p = loadPresets.find(p => p.id === e.target.value)
+                      if (p) applyLoadPreset(p)
+                    }}
+                    className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    defaultValue=""
+                  >
+                    <option value="">— select a preset —</option>
+                    {loadPresets.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Fills in all load parameters from a saved preset
+                  </p>
+                </div>
+              )}
 
               {/* Context Length */}
               <div>

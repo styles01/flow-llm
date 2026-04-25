@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -47,10 +48,35 @@ ws_connections: list[WebSocket] = []  # For real-time updates to frontend
 _model_configs: dict[str, dict] = {}
 
 # Built-in (read-only) presets
+# Each preset may have:
+#   config      — runtime params injected per-request (temperature, top_p, etc.)
+#   load_params — load-time params used when starting the model backend
+# Either or both keys may be present.
 BUILTIN_PRESETS = [
     {
+        "id": "qwen36_tools",
+        "name": "Qwen3.6 — Tools + Vision (full setup)",
+        "builtin": True,
+        "load_params": {
+            "mlx_context_length": 262144,
+            "mlx_prompt_cache_size": 10,
+            "mlx_enable_auto_tool_choice": True,
+            "mlx_reasoning_parser": "qwen3",
+            "mlx_tool_call_parser": "qwen3",
+            "mlx_model_type": "multimodal",
+            "mlx_chat_template_file": "/Users/jameyaita/JAMES-LLM/templates/qwen36_tools_hermes.jinja",
+        },
+        "config": {
+            "temperature": 0.6,
+            "top_p": 0.95,
+            "top_k": 20,
+            "presence_penalty": 1.5,
+            "chat_template_kwargs": {"preserve_thinking": True, "enable_thinking": True},
+        },
+    },
+    {
         "id": "qwen3_thinking",
-        "name": "Qwen3.6 — Thinking",
+        "name": "Qwen3.6 — Thinking (runtime only)",
         "builtin": True,
         "config": {
             "temperature": 0.6,
@@ -88,6 +114,10 @@ BUILTIN_PRESETS = [
         "id": "gemma4",
         "name": "Gemma 4",
         "builtin": True,
+        "load_params": {
+            "mlx_context_length": 32768,
+            "mlx_model_type": "multimodal",
+        },
         "config": {"temperature": 1.0},
     },
     {
@@ -1169,10 +1199,13 @@ async def create_preset(body: dict):
     """Create a new user preset."""
     name = body.get("name", "").strip()
     config = body.get("config", {})
+    load_params = body.get("load_params")  # optional — load-time parameters
     if not name:
         raise HTTPException(400, "name is required")
     data = settings.load_presets()
-    preset = {"id": str(uuid.uuid4()), "name": name, "builtin": False, "config": config}
+    preset: dict = {"id": str(uuid.uuid4()), "name": name, "builtin": False, "config": config}
+    if load_params:
+        preset["load_params"] = load_params
     data.setdefault("user_presets", []).append(preset)
     settings.save_presets(data)
     return preset
@@ -1665,6 +1698,46 @@ async def chat_completions(request: dict):
             _extra["chat_template_kwargs"] = _ctk
             req_body["extra_body"] = _extra
 
+    # ---------------------------------------------------------------------------
+    # Helper: rescue <tool_call> tags stranded in message.content
+    # ---------------------------------------------------------------------------
+    # When the model skips <think>...</think> and goes straight to <tool_call>,
+    # the reasoning parser returns {"content": "<tool_call>..."} without ever
+    # calling the tool parser.  We catch this in the proxy and extract tool calls
+    # from content ourselves so Hermes always gets tool_calls[] + finish_reason=tool_calls.
+    _TC_RE = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
+
+    def _rescue_tool_calls(result: dict) -> dict:
+        choices = result.get("choices", [])
+        new_choices = []
+        changed = False
+        for choice in choices:
+            msg = choice.get("message", {})
+            content = msg.get("content") or ""
+            if msg.get("tool_calls") is None and "<tool_call>" in content:
+                matches = _TC_RE.findall(content)
+                parsed: list = []
+                for m in matches:
+                    try:
+                        td = json.loads(m.strip())
+                        parsed.append({
+                            "id": f"call_{uuid.uuid4().hex[:16]}",
+                            "type": "function",
+                            "function": {
+                                "name": td.get("name", ""),
+                                "arguments": json.dumps(td.get("arguments", {})),
+                            },
+                        })
+                    except Exception:
+                        pass
+                if parsed:
+                    new_msg = {**msg, "content": "", "tool_calls": parsed}
+                    new_choices.append({**choice, "message": new_msg, "finish_reason": "tool_calls"})
+                    changed = True
+                    continue
+            new_choices.append(choice)
+        return {**result, "choices": new_choices} if changed else result
+
     # Workaround: mlx-openai-server's multimodal handler (mlx_vlm.py) crashes when
     # assistant messages have null content (which happens after tool_calls turns).
     # Coerce null → "" so multimodal backends handle tool-call round-trips correctly.
@@ -1705,7 +1778,7 @@ async def chat_completions(request: dict):
                         json=ns_body,
                         headers={"Content-Type": "application/json"},
                     )
-                    result = resp.json()
+                    result = _rescue_tool_calls(resp.json())
                 except Exception as exc:
                     error_request(track_id, str(exc))
                     yield f"data: {json.dumps({'error': str(exc)})}\n\ndata: [DONE]\n\n"
@@ -1905,7 +1978,7 @@ async def chat_completions(request: dict):
                     headers={"Content-Type": "application/json"},
                 )
 
-                result = response.json()
+                result = _rescue_tool_calls(response.json())
                 end_time = time.monotonic()
 
                 # Extract telemetry
