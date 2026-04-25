@@ -1,6 +1,7 @@
 """Flow LLM FastAPI application with management API and OpenAI-compatible proxy."""
 
 import asyncio
+import html as _html
 import json
 import logging
 import re
@@ -132,11 +133,27 @@ BUILTIN_PRESETS = [
 # Tool-call rescue helpers (module-level so both /v1/chat/completions and
 # /v1/messages handlers can use them)
 # ---------------------------------------------------------------------------
+# Hermes JSON format: <tool_call>{"name":...,"arguments":{...}}</tool_call>
 _TC_RE = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
 # Matches an unclosed <tool_call> — model truncated before </tool_call>
 _TC_OPEN_RE = re.compile(r"<tool_call>(.*?)$", re.DOTALL)
 # Extracts just the name field as a last-resort fallback
 _TC_NAME_RE = re.compile(r'"name"\s*:\s*"([^"]+)"')
+
+# Qwen3-Coder / unsloth XML format:
+#   <tool_call>
+#   <function=tool_name>
+#   <parameter=arg1>value</parameter>
+#   </function>
+#   </tool_call>
+_XML_TC_RE = re.compile(
+    r"<tool_call>\s*<function=(\w+)>(.*?)</function>\s*</tool_call>",
+    re.DOTALL,
+)
+_XML_PARAM_RE = re.compile(r"<parameter=(\w+)>\s*(.*?)\s*</parameter>", re.DOTALL)
+
+# Thinking block stripping: catches ...\n</think>\n (model skipped opening <think>)
+_THINK_CLOSE_RE = re.compile(r"^(.*?)</think>\s*", re.DOTALL)
 
 
 def _parse_tc_json(raw: str) -> dict | None:
@@ -160,12 +177,26 @@ def _parse_tc_json(raw: str) -> dict | None:
     return None
 
 
+def _parse_xml_tool_call(func_name: str, params_str: str) -> dict | None:
+    """Parse Qwen3-Coder XML-style tool call into name+arguments dict."""
+    if not func_name:
+        return None
+    params: dict = {}
+    for pm in _XML_PARAM_RE.finditer(params_str):
+        params[pm.group(1)] = pm.group(2)
+    return {"name": func_name, "arguments": params}
+
+
 def _rescue_tool_calls(result: dict) -> dict:
     """If backend returned <tool_call> XML in message.content instead of tool_calls[],
     extract and promote them.  Handles:
-    - Closed tags: <tool_call>...</tool_call>
-    - Truncated tags: <tool_call>... (no closing tag — model cut off)
-    - Truncated JSON: missing 1-3 closing braces
+    - Hermes JSON closed:   <tool_call>{"name":...}</tool_call>
+    - Hermes JSON unclosed: <tool_call>{"name":... (truncated)
+    - Qwen XML closed:      <tool_call><function=name><parameter=x>v</parameter></function></tool_call>
+    - Truncated JSON:       missing 1-3 closing braces
+    Also strips residual </think> blocks that the reasoning parser missed (model
+    generates thinking content without leading <think> tag so the parser never
+    activates, leaving ...\n</think>\n in content).
     """
     choices = result.get("choices", [])
     new_choices = []
@@ -173,16 +204,61 @@ def _rescue_tool_calls(result: dict) -> dict:
     for choice in choices:
         msg = choice.get("message", {})
         content = msg.get("content") or ""
-        if msg.get("tool_calls") is None and "<tool_call>" in content:
-            # First try closed tags
-            matches = _TC_RE.findall(content)
-            # Fall back to unclosed (truncated) if none found
-            if not matches and not _TC_RE.search(content):
-                unclosed = _TC_OPEN_RE.findall(content)
-                matches = unclosed
-            parsed: list = []
-            for m in matches:
-                td = _parse_tc_json(m)
+
+        # ── 0. HTML-unescape: Telegram/Hermes sometimes stores &lt;tool_call&gt; entities
+        #    in session history.  The model then mimics that format on the next turn,
+        #    producing HTML-escaped content our regex can't match.  Normalize first.
+        if "&lt;" in content:
+            content = _html.unescape(content)
+            msg = {**msg, "content": content}
+            changed = True
+
+        # ── 1. Strip residual thinking block (..text..\n</think>\nactual response)
+        if "</think>" in content and not msg.get("reasoning_content"):
+            m = _THINK_CLOSE_RE.match(content)
+            if m:
+                thinking_text = m.group(1).lstrip()
+                # strip leading <think> if the parser did capture the opening tag
+                if thinking_text.startswith("<think>"):
+                    thinking_text = thinking_text[len("<think>"):].lstrip()
+                content = content[m.end():]
+                msg = {**msg, "content": content, "reasoning_content": thinking_text}
+                changed = True
+
+        if msg.get("tool_calls") is not None or "<tool_call>" not in content:
+            new_choices.append({**choice, "message": msg} if changed else choice)
+            continue
+
+        # ── 2a. Try Hermes JSON format first (closed tags)
+        matches_json = _TC_RE.findall(content)
+
+        # ── 2b. Try Qwen XML format
+        xml_matches = _XML_TC_RE.findall(content)
+
+        # ── 2c. Fall back to unclosed JSON (truncated)
+        if not matches_json and not xml_matches and not _TC_RE.search(content):
+            unclosed = _TC_OPEN_RE.findall(content)
+            matches_json = unclosed
+
+        parsed: list = []
+
+        # Parse JSON matches
+        for m in matches_json:
+            td = _parse_tc_json(m)
+            if td and td.get("name"):
+                parsed.append({
+                    "id": f"call_{uuid.uuid4().hex[:16]}",
+                    "type": "function",
+                    "function": {
+                        "name": td["name"],
+                        "arguments": json.dumps(td.get("arguments", {})),
+                    },
+                })
+
+        # Parse XML matches (only if no JSON found — avoid double-counting)
+        if not parsed:
+            for func_name, params_str in xml_matches:
+                td = _parse_xml_tool_call(func_name, params_str)
                 if td and td.get("name"):
                     parsed.append({
                         "id": f"call_{uuid.uuid4().hex[:16]}",
@@ -192,12 +268,14 @@ def _rescue_tool_calls(result: dict) -> dict:
                             "arguments": json.dumps(td.get("arguments", {})),
                         },
                     })
-            if parsed:
-                new_msg = {**msg, "content": "", "tool_calls": parsed}
-                new_choices.append({**choice, "message": new_msg, "finish_reason": "tool_calls"})
-                changed = True
-                continue
-        new_choices.append(choice)
+
+        if parsed:
+            new_msg = {**msg, "content": "", "tool_calls": parsed}
+            new_choices.append({**choice, "message": new_msg, "finish_reason": "tool_calls"})
+            changed = True
+            continue
+
+        new_choices.append({**choice, "message": msg} if changed else choice)
     return {**result, "choices": new_choices} if changed else result
 
 
@@ -1122,8 +1200,8 @@ async def load_model(model_id: str, request: ModelLoadRequest):
             tool_call_parser = request.mlx_tool_call_parser
             reasoning_parser = request.mlx_reasoning_parser
             chat_template_file = request.mlx_chat_template_file
+            name = model_id.lower()
             if not tool_call_parser and model.supports_tools is True:
-                name = model_id.lower()
                 if "qwen" in name:
                     if "3.5" in name:
                         tool_call_parser = "qwen3_coder"
@@ -1132,17 +1210,20 @@ async def load_model(model_id: str, request: ModelLoadRequest):
                     # Auto-select reasoning parser so thinking blocks are stripped cleanly
                     if not reasoning_parser:
                         reasoning_parser = "qwen3"
-                    # Qwen MLX conversions often lose proper tool-calling format instructions;
-                    # enforce a chat template that knows how to emit <tool_call> tags
-                    if not chat_template_file:
-                        import pathlib
-                        default_tpl = (
-                            pathlib.Path(__file__).parent.parent.parent
-                            / "templates"
-                            / "qwen36_tools_hermes.jinja"
-                        )
-                        if default_tpl.exists():
-                            chat_template_file = str(default_tpl)
+            # For Qwen models, always enforce the Hermes JSON chat template if none is set.
+            # Qwen MLX conversions often use <function=...> XML format by default; our
+            # template forces <tool_call>{"name":...}</tool_call> JSON format that all parsers
+            # can handle.  This runs regardless of whether tool_call_parser was auto-selected
+            # or explicitly provided.
+            if "qwen" in name and not chat_template_file:
+                import pathlib
+                default_tpl = (
+                    pathlib.Path(__file__).parent.parent.parent
+                    / "templates"
+                    / "qwen36_tools_hermes.jinja"
+                )
+                if default_tpl.exists():
+                    chat_template_file = str(default_tpl)
 
             proc = await process_manager.start_model(
                 model_id=model_id,
@@ -1513,6 +1594,15 @@ async def anthropic_messages(request: dict):
             anthro_request_id,
         )
 
+    if not getattr(proc, "backend_ready", True):
+        error_request(track_id, "Model is still loading")
+        return _anthropic_error_response(
+            503,
+            "overloaded_error",
+            "Model is still warming up — please retry in a few seconds",
+            anthro_request_id,
+        )
+
     start_time = time.monotonic()
     backend_url = proc.base_url
 
@@ -1678,6 +1768,16 @@ async def anthropic_messages(request: dict):
 
     try:
         result = _rescue_tool_calls(response.json())
+        # DEBUG: log Anthropic path result
+        for _dc in result.get("choices", []):
+            _dm = _dc.get("message", {})
+            print(
+                f"[PROXY DEBUG /v1/messages] finish={_dc.get('finish_reason')} "
+                f"tool_calls={bool(_dm.get('tool_calls'))} "
+                f"content={repr((_dm.get('content') or '')[:200])} "
+                f"reasoning_len={len(_dm.get('reasoning_content') or '')}",
+                flush=True
+            )
         anthropic_result = to_anthropic_response(result, model_name)
     except (ValueError, AnthropicRequestError) as exc:
         message = exc.message if isinstance(exc, AnthropicRequestError) else f"Failed to decode backend response: {exc}"
@@ -1765,6 +1865,14 @@ async def chat_completions(request: dict):
         error_request(track_id, f"Model '{model_name}' is not loaded")
         raise HTTPException(404, f"Model '{model_name}' is not loaded. Available: {list(process_manager.get_all_processes().keys())}")
 
+    # Guard: if the backend process hasn't finished loading weights yet, reject
+    # the request cleanly rather than letting it through to a half-warm model.
+    # A malformed response from a loading model corrupts the client's context
+    # irreversibly (the client stores it in conversation history).
+    if not getattr(proc, "backend_ready", True):
+        error_request(track_id, "Model is still loading")
+        raise HTTPException(503, "Model is still warming up — please retry in a few seconds")
+
     start_time = time.monotonic()
     backend_url = proc.base_url
 
@@ -1794,6 +1902,18 @@ async def chat_completions(request: dict):
                 _patched_msgs.append(_msg)
         req_body = {**req_body, "messages": _patched_msgs}
 
+    # DEBUG: log key fields from every proxied request
+    print(
+        f"[PROXY REQ] stream={req_body.get('stream')} "
+        f"max_tokens={req_body.get('max_tokens')} "
+        f"stop={req_body.get('stop')} "
+        f"tools={bool(req_body.get('tools'))} "
+        f"msgs={len(req_body.get('messages', []))} "
+        f"last_role={req_body.get('messages', [{}])[-1].get('role')} "
+        f"chat_template_kwargs={req_body.get('extra_body', {}).get('chat_template_kwargs')}",
+        flush=True
+    )
+
     if req_body.get("stream", False):
         # -----------------------------------------------------------------------
         # Streaming + tools workaround
@@ -1821,6 +1941,15 @@ async def chat_completions(request: dict):
             # window (262K) is the real cap, so this is safe.
             if proc.mlx_reasoning_parser and "max_tokens" in ns_body:
                 ns_body = {k: v for k, v in ns_body.items() if k != "max_tokens"}
+            # DEBUG: log key request fields
+            print(
+                f"[PROXY REQ] max_tokens={req_body.get('max_tokens')} "
+                f"stop={req_body.get('stop')} "
+                f"msgs={len(req_body.get('messages', []))} "
+                f"last_role={req_body.get('messages', [{}])[-1].get('role')} "
+                f"chat_template_kwargs={req_body.get('extra_body', {}).get('chat_template_kwargs')}",
+                flush=True
+            )
             request_input_estimate = _estimate_input_tokens(req_body)
 
             async def stream_tool_calls_via_nonstreaming():
@@ -1832,6 +1961,17 @@ async def chat_completions(request: dict):
                         headers={"Content-Type": "application/json"},
                     )
                     result = _rescue_tool_calls(resp.json())
+                    # DEBUG: log what the backend actually returned
+                    _choices = result.get("choices", [])
+                    for _c in _choices:
+                        _msg = _c.get("message", {})
+                        print(
+                            f"[PROXY DEBUG] finish={_c.get('finish_reason')} "
+                            f"tool_calls={bool(_msg.get('tool_calls'))} "
+                            f"content={repr((_msg.get('content') or '')[:300])} "
+                            f"reasoning_len={len(_msg.get('reasoning_content') or '')}",
+                            flush=True
+                        )
                 except Exception as exc:
                     error_request(track_id, str(exc))
                     yield f"data: {json.dumps({'error': str(exc)})}\n\ndata: [DONE]\n\n"
@@ -2036,6 +2176,16 @@ async def chat_completions(request: dict):
                 )
 
                 result = _rescue_tool_calls(response.json())
+                # DEBUG: log non-streaming path result
+                for _dc in result.get("choices", []):
+                    _dm = _dc.get("message", {})
+                    print(
+                        f"[PROXY DEBUG non-stream] finish={_dc.get('finish_reason')} "
+                        f"tool_calls={bool(_dm.get('tool_calls'))} "
+                        f"content={repr((_dm.get('content') or '')[:200])} "
+                        f"reasoning_len={len(_dm.get('reasoning_content') or '')}",
+                        flush=True
+                    )
                 end_time = time.monotonic()
 
                 # Extract telemetry
