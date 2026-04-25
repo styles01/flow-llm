@@ -2,6 +2,26 @@
 
 All notable changes to Flow LLM will be documented in this file.
 
+## [Unreleased] - 2026-04-24
+
+### Added
+- **Qwen3.6-35B-A3B MLX support** — full tool calling + vision via `unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit`
+  - Custom chat template (`templates/qwen36_tools_hermes.jinja`) with Hermes JSON tool-call format, correct generation prefix (no `<think>` prefix so reasoning parser can strip it cleanly), and null-safe `{% if tools %}` guard
+  - Proxy-level `_rescue_tool_calls()`: when the model skips `<think>` and goes straight to `<tool_call>`, the reasoning parser returns raw content and the backend tool parser is bypassed — the proxy now detects and extracts these stranded tool calls itself
+  - Streaming + tools safety workaround: `stream=True` + tools present → proxy converts to non-streaming (which always parses correctly), then re-emits as SSE so Hermes/OpenClaw see a proper streaming interface
+  - Auto-select logic now sets both `tool_call_parser=qwen3` AND `reasoning_parser=qwen3` for Qwen models (previously only set `tool_call_parser`)
+  - Null content coercion: `assistant.content = null` → `""` before forwarding to multimodal backends, fixing VLM round-trip crash
+- **Load presets** — presets now support an optional `load_params` key (alongside `config`) covering all mlx load-time parameters
+  - Built-in "Qwen3.6 — Tools + Vision (full setup)" preset fills context length, parsers, model type, and template path in one click
+  - `POST /api/presets` now accepts and stores `load_params`
+  - Load Dialog fetches presets from the API and applies `load_params` to all form fields; replaces stale hardcoded frontend preset list
+- Documentation: `docs/qwen36-tool-calling-setup.md` — full write-up of root causes, fixes, correct load parameters, and verified test results
+
+### Fixed
+- `<tool_call>` XML leaking into Hermes chat content when model skips thinking
+- `finish_reason: stop` instead of `tool_calls` for streaming tool-call responses
+- Multimodal round-trip crash: "can only concatenate str (not NoneType) to str"
+
 ## [1.0.0] - 2026-04-13
 
 ### Added
