@@ -55,7 +55,7 @@ _model_configs: dict[str, dict] = {}
 BUILTIN_PRESETS = [
     {
         "id": "qwen36_tools",
-        "name": "Qwen3.6 — Tools + Vision (full setup)",
+        "name": "Qwen3.6 — Tools (stable)",
         "builtin": True,
         "load_params": {
             "mlx_context_length": 262144,
@@ -63,7 +63,6 @@ BUILTIN_PRESETS = [
             "mlx_enable_auto_tool_choice": True,
             "mlx_reasoning_parser": "qwen3",
             "mlx_tool_call_parser": "qwen3",
-            "mlx_model_type": "multimodal",
             "mlx_chat_template_file": "/Users/jameyaita/JAMES-LLM/templates/qwen36_tools_hermes.jinja",
         },
         "config": {
