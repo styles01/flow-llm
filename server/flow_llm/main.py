@@ -618,6 +618,9 @@ async def list_running_models():
         for model_id, proc in processes.items():
             model = session.query(Model).filter(Model.id == model_id).first()
             backend_ready = await _check_backend_ready(proc.base_url)
+            # Clear load_progress once fully ready
+            if backend_ready and getattr(proc, "load_progress", None) is not None:
+                proc.load_progress = None
             result.append({
                 "model_id": model_id,
                 "name": model.name if model else model_id,
@@ -627,6 +630,7 @@ async def list_running_models():
                 "pid": proc.get_pid(),
                 "is_running": proc.is_running(),
                 "backend_ready": backend_ready,
+                "load_progress": getattr(proc, "load_progress", None),
             })
     finally:
         session.close()

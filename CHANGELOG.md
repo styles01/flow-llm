@@ -2,7 +2,7 @@
 
 All notable changes to Flow LLM will be documented in this file.
 
-## [Unreleased] - 2026-04-25
+## [1.1.0] - 2026-04-26
 
 ### Fixed
 - **`peak_memory` crash on tool-call round-trips** — root cause: `app/models/mlx_vlm.py` only tracked `final_chunk` when `chunk.text` was truthy; tool-call responses have `content: ""` so `final_chunk` stayed `None`, crashing with `'NoneType' object has no attribute 'peak_memory'` → 500 on every follow-up. Fix: track `final_chunk` for all non-None chunks regardless of text content.
@@ -21,7 +21,7 @@ All notable changes to Flow LLM will be documented in this file.
 - **Warming-up UX on Monitor page** — models still loading weights show an amber pulsing dot, "warming up…" badge, and explanatory text; the Configure/Open UI buttons are disabled until `backend_ready=True`.
 - **`backend_ready` field on `/api/models/running`** — server performs a live `GET /v1/models` health-check on each backend to distinguish "process started" from "weights fully loaded". Previously all running models reported as immediately ready.
 
-## [Unreleased] - 2026-04-24
+## [1.0.1] - 2026-04-24
 
 ### Added
 - **Qwen3.6-35B-A3B MLX support** — full tool calling + vision via `unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit`

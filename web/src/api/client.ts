@@ -49,6 +49,7 @@ export interface RunningModel {
   pid: number | null;
   is_running: boolean;
   backend_ready: boolean;
+  load_progress: number | null;  // 0-100 during weight loading, null when done
 }
 
 export interface HFSearchResult {

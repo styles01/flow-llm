@@ -148,9 +148,13 @@ class BackendProcess:
         self.host = host
         self.process: Optional[subprocess.Popen] = None
         self._health_task: Optional[asyncio.Task] = None
+        self.load_progress: int | None = None  # 0-100 during weight loading, None when done
 
     def _monitor_stderr(self):
-        """Read stderr from the backend process and parse per-slot progress lines."""
+        """Read stderr from the backend process and parse per-slot progress lines.
+        Also captures mlx-lm weight-loading progress (tqdm writes to stderr):
+          'Loading weights:  42%|████▏     | 47/112 [...]'
+        """
         if not self.process or not self.process.stderr:
             return
 
@@ -160,6 +164,8 @@ class BackendProcess:
         _slot_re = re.compile(r'\bid\s+(\d+)\s*\|\s*task\s+(\d+)')
         # Prefill progress: "prompt processing progress, n_tokens = X, ..., progress = 0.123"
         _progress_re = re.compile(r'prompt processing progress.*?progress\s*=\s*(\d+\.?\d*)', re.DOTALL)
+        # Weight loading progress from mlx-lm tqdm (goes to stderr)
+        _weight_re = re.compile(r'Loading weights.*?(\d+)%')
 
         try:
             for line in iter(self.process.stderr.readline, b''):
@@ -177,6 +183,11 @@ class BackendProcess:
                 task_id = int(sm.group(2)) if sm else None
 
                 if slot_id is None:
+                    # Weight-loading progress (mlx-lm tqdm on stderr)
+                    wm = _weight_re.search(text)
+                    if wm:
+                        self.load_progress = int(wm.group(1))
+                        continue
                     # "srv  update_slots: all slots are idle"
                     if 'all slots are idle' in text:
                         # Clear each active slot individually instead of nuking all

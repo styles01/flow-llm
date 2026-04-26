@@ -239,7 +239,7 @@ export default function MonitorPage() {
                     }`}>{m.backend}</span>
                     {warming && (
                       <span className="px-1.5 py-0.5 rounded text-xs bg-amber-900/40 text-amber-300 animate-pulse">
-                        warming up…
+                        {m.load_progress != null ? `loading ${m.load_progress}%` : 'warming up…'}
                       </span>
                     )}
                   </div>
@@ -247,9 +247,23 @@ export default function MonitorPage() {
                     Port {m.port} · PID {m.pid} · {m.base_url}
                   </p>
                   {warming && (
-                    <p className="text-xs text-amber-500/70 mt-1">
-                      Loading model weights into memory — requests will queue until ready
-                    </p>
+                    <div className="mt-2">
+                      {m.load_progress != null ? (
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 bg-gray-800 rounded-full h-1.5 max-w-xs">
+                            <div
+                              className="bg-amber-400 h-1.5 rounded-full transition-all duration-500"
+                              style={{ width: `${m.load_progress}%` }}
+                            />
+                          </div>
+                          <span className="text-xs text-amber-500/70">{m.load_progress}% — requests queued until ready</span>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-amber-500/70">
+                          Loading model weights into memory — requests will queue until ready
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
                 <div className="flex gap-2">

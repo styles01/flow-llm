@@ -226,6 +226,40 @@ Auto-detects the model name. Unloading kills the backend process and frees memor
 |----------|---------|
 | `/ws` | Real-time updates (request lifecycle, slot state, metrics, model events) |
 
+## Changelog
+
+### v1.1.0 — Qwen 3.6 MLX tool calling + warmup UX
+
+**Qwen 3.6 MLX support (`unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit`)**
+
+Getting Qwen 3.6 working reliably with Hermes-style agents (38 tools, 100+ message sessions, streaming) required fixing a cascade of interacting bugs:
+
+- **XML tool call format** — this unsloth quantization generates `<function=name><parameter=x>v</parameter></function>` inside `<tool_call>` tags (Qwen3-Coder format), not Hermes JSON. The proxy now parses both formats and normalises to `tool_calls[]`.
+- **HTML entity cascade** — when a tool call leaked as text, Telegram HTML-escaped it (`<tool_call>` → `&lt;tool_call&gt;`) in session storage. The model then mimicked the escaped format on every subsequent turn, snowballing until the session was unrecoverable. Fixed with `html.unescape()` as the first step in rescue.
+- **Truncated responses** — Hermes sends `max_tokens=4096`; with the reasoning parser active, thinking tokens consumed the budget leaving 2–5 tokens for the actual reply. The proxy now drops `max_tokens` when a reasoning parser is active, letting the full context window (262K) be the cap.
+- **`</think>` bleeding into content** — the reasoning parser only activates when it sees a `<think>` opening tag in the stream, but Qwen3's generation prefix omits it. Any thinking content was flowing into `content`. Fixed with a stripping pass that moves `…\n</think>\n` to `reasoning_content`.
+- **Half-warm model poisoning** — requests arriving during weight loading returned malformed responses that agents stored permanently in session history. The proxy now returns 503 until the backend health check passes.
+
+**Preset and template handling**
+
+- Built-in "Qwen3.6 — Tools (stable)" preset covers all required load params: 262K context, `qwen3` reasoning/tool parsers, Hermes JSON chat template, trust-remote-code.
+- Qwen chat template auto-fill now runs regardless of whether `tool_call_parser` was explicitly provided (was previously skipped).
+
+**Warmup UX improvements**
+
+- Monitor page shows a real loading percentage bar (`Loading weights: 42%`) parsed from mlx-lm's stderr during weight loading, so you know exactly where the model is instead of just an amber "warming up" badge.
+- Backend-ready guard: the proxy rejects requests with 503 while weights are still loading — agents get a clean retryable error instead of a malformed response that corrupts their context.
+
+---
+
+### v1.0.0 — Real-time Monitor + request lifecycle tracking
+
+- Per-request lifecycle tracking: queued → prefilling → generating → sending → completed
+- WebSocket push for real-time monitor updates
+- LM Studio-style odometer token counter
+- PWA manifest, app icons, theme-color meta tag
+- Telemetry page redesigned with card layout and color-coded TTFT
+
 ## License
 
 [MIT](LICENSE)
