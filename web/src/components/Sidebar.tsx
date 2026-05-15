@@ -182,7 +182,7 @@ function SidebarContent({ collapsed, runningCount, onToggleCollapse, onNavClick 
       {/* Collapse toggle & version */}
       {onToggleCollapse && (
         <div className={`p-4 border-t border-gray-800 flex ${collapsed ? 'justify-center' : 'items-center justify-between'}`}>
-          {!collapsed && <p className="text-xs text-gray-600">v0.1.0</p>}
+          {!collapsed && <p className="text-xs text-gray-600">v1.5.0</p>}
           <button
             onClick={onToggleCollapse}
             className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"

@@ -76,9 +76,9 @@ pip install mlx-openai-server
 flow
 ```
 
-### 2. Load a model
+### 2. Add a model (one-time setup)
 
-In the UI: **Models** → search HuggingFace, or **Connect Running Model** if you already have a llama-server.
+In the UI: **Models** → search HuggingFace, download and register any model. Or connect a running backend.
 
 Or via API:
 
@@ -88,7 +88,9 @@ curl -X POST http://localhost:3377/api/register-local \
   -d '{"gguf_path": "/path/to/model.gguf"}'
 ```
 
-### 3. Point your agent
+### 3. Point your agent — that's it
+
+JIT loading is on by default. Your first inference request will auto-load the model. No need to pre-load manually.
 
 ```json
 {
