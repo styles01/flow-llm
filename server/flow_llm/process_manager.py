@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import re
 import subprocess
 from collections import deque
@@ -123,6 +124,8 @@ class BackendProcess:
         mlx_chat_template_file: str = "",
         mlx_trust_remote_code: bool = False,
         mlx_model_type: str = "lm",
+        draft_model_path: str = "",
+        num_draft_tokens: int = 2,
         host: str = DEFAULT_LLAMACPP_HOST
     ):
         self.model_id = model_id
@@ -145,6 +148,8 @@ class BackendProcess:
         self.mlx_chat_template_file = mlx_chat_template_file
         self.mlx_trust_remote_code = mlx_trust_remote_code
         self.mlx_model_type = mlx_model_type
+        self.draft_model_path = draft_model_path
+        self.num_draft_tokens = num_draft_tokens
         self.host = host
         self.process: Optional[subprocess.Popen] = None
         self._health_task: Optional[asyncio.Task] = None
@@ -252,28 +257,19 @@ class BackendProcess:
                 "--metrics",
             ]
         elif self.backend == "mlx":
+            bridge_script = os.path.join(
+                os.path.dirname(os.path.dirname(__file__)), "mlx_bridge.py"
+            )
             cmd = [
-                "mlx-openai-server",
-                "launch",
-                "--model-path", self.model_path,
-                "--model-type", self.mlx_model_type or "lm",
+                "python3", bridge_script,
+                "--model", self.model_path,
                 "--host", self.host,
                 "--port", str(self.port),
             ]
             if self.mlx_context_length > 0:
                 cmd.extend(["--context-length", str(self.mlx_context_length)])
-            if self.mlx_prompt_cache_size > 0:
-                cmd.extend(["--prompt-cache-size", str(self.mlx_prompt_cache_size)])
-            if self.mlx_enable_auto_tool_choice:
-                cmd.append("--enable-auto-tool-choice")
-            if self.mlx_reasoning_parser:
-                cmd.extend(["--reasoning-parser", self.mlx_reasoning_parser])
-            if self.mlx_tool_call_parser:
-                cmd.extend(["--tool-call-parser", self.mlx_tool_call_parser])
             if self.mlx_chat_template_file:
-                cmd.extend(["--chat-template-file", self.mlx_chat_template_file])
-            if self.mlx_trust_remote_code:
-                cmd.append("--trust-remote-code")
+                cmd.extend(["--chat-template", self.mlx_chat_template_file])
             return cmd
         else:
             raise ValueError(f"Unknown backend: {self.backend}")
@@ -286,11 +282,17 @@ class BackendProcess:
 
         # Check if the command exists
         import shutil
-        if not shutil.which(cmd[0]):
+        if self.backend == "mlx":
+            # mlx_bridge.py is a script, not a binary — check the file exists
+            bridge_path = cmd[1] if len(cmd) > 1 and cmd[0] == "python3" else None
+            if not bridge_path or not os.path.exists(bridge_path):
+                error_msg = f"mlx_bridge.py not found at {bridge_path}"
+                logger.error(error_msg)
+                print(f"[Flow] {error_msg}")
+                raise RuntimeError(error_msg)
+        elif not shutil.which(cmd[0]):
             error_msg = f"Backend command not found: {cmd[0]}. Install it first."
-            if self.backend == "mlx":
-                error_msg = f"mlx-openai-server is not installed. Install with: pip install mlx-openai-server"
-            elif self.backend == "gguf":
+            if self.backend == "gguf":
                 error_msg = f"llama-server is not installed. Install llama.cpp first."
             logger.error(error_msg)
             print(f"[Flow] {error_msg}")
@@ -403,6 +405,7 @@ class ProcessManager:
         self._processes: dict[str, BackendProcess] = {}  # model_id -> BackendProcess
         self._external: dict[str, ExternalProcess] = {}  # model_id -> ExternalProcess
         self._port_alloc: dict[int, str] = {}  # port -> model_id
+        self._lock: asyncio.Lock = asyncio.Lock()  # guards compound mutations
 
     def _allocate_port(self, backend: str) -> int:
         """Allocate an available port for a backend."""
@@ -441,17 +444,23 @@ class ProcessManager:
         mlx_chat_template_file: str = "",
         mlx_trust_remote_code: bool = False,
         mlx_model_type: str = "lm",
+        draft_model_path: str = "",
+        num_draft_tokens: int = 2,
     ) -> BackendProcess:
         """Start a model on a backend. Returns the BackendProcess."""
-        if model_id in self._processes:
-            existing = self._processes[model_id]
-            if existing.is_running():
-                raise ValueError(f"Model {model_id} is already running on port {existing.port}")
-            # Dead process, clean up
-            self._free_port(existing.port)
-            del self._processes[model_id]
+        async with self._lock:
+            if model_id in self._processes:
+                existing = self._processes[model_id]
+                if existing.is_running():
+                    raise ValueError(f"Model {model_id} is already running on port {existing.port}")
+                # Dead process, clean up
+                self._free_port(existing.port)
+                del self._processes[model_id]
 
-        port = self._allocate_port(backend)
+            port = self._allocate_port(backend)
+            # Reserve the port immediately so no concurrent caller steals it
+            self._port_alloc[port] = model_id
+
         proc = BackendProcess(
             model_id=model_id,
             backend=backend,
@@ -471,6 +480,8 @@ class ProcessManager:
             mlx_chat_template_file=mlx_chat_template_file,
             mlx_trust_remote_code=mlx_trust_remote_code,
             mlx_model_type=mlx_model_type,
+            draft_model_path=draft_model_path,
+            num_draft_tokens=num_draft_tokens,
         )
 
         try:
@@ -479,8 +490,8 @@ class ProcessManager:
             self._free_port(port)
             raise
 
-        self._processes[model_id] = proc
-        self._port_alloc[port] = model_id
+        async with self._lock:
+            self._processes[model_id] = proc
         return proc
 
     async def stop_model(self, model_id: str) -> bool:
@@ -493,7 +504,8 @@ class ProcessManager:
         if model_id in self._external:
             ext = self._external[model_id]
             port = ext.port
-            del self._external[model_id]
+            async with self._lock:
+                del self._external[model_id]
             print(f"[Flow] Killing external backend on port {port}")
             logger.info(f"Unregistering external backend: model={model_id} port={port}")
 
@@ -507,20 +519,23 @@ class ProcessManager:
                 logger.warning(f"No process found on port {port} to kill")
             return True
 
-        if model_id not in self._processes:
-            print(f"[Flow] Model '{model_id}' not found in any process list")
-            return False
+        async with self._lock:
+            if model_id not in self._processes:
+                print(f"[Flow] Model '{model_id}' not found in any process list")
+                return False
 
-        proc = self._processes[model_id]
+            proc = self._processes[model_id]
+            del self._processes[model_id]
+
         success = await proc.stop()
         self._free_port(proc.port)
-        del self._processes[model_id]
         return success
 
-    def register_external(self, model_id: str, backend: str, base_url: str, port: int) -> ExternalProcess:
+    async def register_external(self, model_id: str, backend: str, base_url: str, port: int) -> ExternalProcess:
         """Register an already-running backend process not started by Flow LLM."""
         ext = ExternalProcess(model_id=model_id, backend=backend, base_url=base_url, port=port)
-        self._external[model_id] = ext
+        async with self._lock:
+            self._external[model_id] = ext
         logger.info(f"Registered external backend: model={model_id} base_url={base_url}")
         return ext
 
@@ -540,6 +555,13 @@ class ProcessManager:
 
     async def stop_all(self):
         """Stop all running backends."""
+        # Cancel all JIT cooldown timers before stopping processes
+        try:
+            from flow_llm.jit_manager import jit_manager
+            await jit_manager.cleanup()
+        except ImportError:
+            pass
+
         for model_id in list(self._processes.keys()):
             await self.stop_model(model_id)
         for model_id in list(self._external.keys()):

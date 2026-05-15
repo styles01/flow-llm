@@ -4,6 +4,7 @@
  * generating (teal beam with token counter), sending (magenta flash), completed (green checkmark).
  */
 
+import { useEffect, useRef, useState } from 'react'
 import { TokenCounter } from './TokenCounter'
 import type { TrackedRequest } from '../store/monitorStore'
 
@@ -13,8 +14,31 @@ interface RequestBeamProps {
   prefillProgress?: number  // 0-1 from slot state (if available)
 }
 
+function ThinkingDots() {
+  const [frame, setFrame] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setFrame(f => (f + 1) % 4), 500)
+    return () => clearInterval(id)
+  }, [])
+  const dots = '.'.repeat(frame)
+  const pad = ' '.repeat(3 - frame)  // non-breaking spaces to hold width
+  return <>{dots}{pad}</>
+}
+
 export function RequestBeam({ request, queuePosition, prefillProgress }: RequestBeamProps) {
   const elapsed = ((performance.now() / 1000) - request.started_at) * 1000
+
+  // Local elapsed timer for stages without real progress (e.g. MLX prefilling)
+  const mountedAt = useRef(Date.now())
+  const [localElapsed, setLocalElapsed] = useState(0)
+
+  useEffect(() => {
+    if (request.stage !== 'prefilling' && request.stage !== 'queued') return
+    const id = setInterval(() => {
+      setLocalElapsed(Math.floor((Date.now() - mountedAt.current) / 1000))
+    }, 1000)
+    return () => clearInterval(id)
+  }, [request.stage])
 
   switch (request.stage) {
     case 'queued':
@@ -31,23 +55,57 @@ export function RequestBeam({ request, queuePosition, prefillProgress }: Request
         </div>
       )
 
-    case 'prefilling':
+    case 'prefilling': {
       const progress = prefillProgress ?? 0
-      return (
-        <div className="flex items-center gap-2 h-8 px-2 rounded bg-amber-950/20 border border-amber-800/30">
-          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
-          <span className="text-xs text-amber-400 shrink-0">Analyzing</span>
-          <div className="flex-1 bg-gray-800 rounded-full h-1.5 overflow-hidden">
-            <div
-              className="h-1.5 bg-gradient-to-r from-amber-500 to-amber-300 rounded-full transition-all duration-300"
-              style={{ width: `${Math.round(progress * 100)}%` }}
-            />
+      const hasRealProgress = progress > 0.01
+
+      if (hasRealProgress) {
+        // GGUF: real prefill progress from slot state
+        return (
+          <div className="flex items-center gap-2 h-8 px-2 rounded bg-amber-950/20 border border-amber-800/30">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
+            <span className="text-xs text-amber-400 shrink-0">Prefilling</span>
+            <div className="flex-1 bg-gray-800 rounded-full h-1.5 overflow-hidden">
+              <div
+                className="h-1.5 bg-gradient-to-r from-amber-500 to-amber-300 rounded-full transition-all duration-300"
+                style={{ width: `${Math.round(progress * 100)}%` }}
+              />
+            </div>
+            <span className="text-xs text-amber-400/80 font-mono w-8 text-right shrink-0">
+              {Math.round(progress * 100)}%
+            </span>
           </div>
-          <span className="text-xs text-amber-400/80 font-mono w-8 text-right shrink-0">
-            {Math.round(progress * 100)}%
+        )
+      }
+
+      // MLX / indeterminate: show thinking comet animation
+      return (
+        <div
+          className="flex items-center gap-2 h-10 px-2 rounded bg-amber-950/20 border border-amber-800/30 relative overflow-hidden"
+          style={{ boxShadow: '0 0 12px rgba(251,191,36,0.08), 0 0 30px rgba(251,191,36,0.04)' }}
+        >
+          {/* Comet sweep */}
+          <div
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              background: 'linear-gradient(90deg, transparent 0%, rgba(251,191,36,0.06) 20%, rgba(251,191,36,0.22) 50%, rgba(253,230,138,0.32) 65%, rgba(251,191,36,0.10) 80%, transparent 100%)',
+              animation: 'think-comet 2.8s ease-in-out infinite',
+            }}
+          />
+          {/* Dot + label */}
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0 relative z-10" />
+          <span className="text-xs text-amber-400 shrink-0 relative z-10">Thinking</span>
+          {/* Animated dots */}
+          <span className="text-xs text-amber-400/60 relative z-10" style={{ letterSpacing: '0.15em' }}>
+            <ThinkingDots />
+          </span>
+          {/* Elapsed */}
+          <span className="ml-auto text-[10px] text-amber-500/50 font-mono relative z-10">
+            {localElapsed > 0 ? `${localElapsed}s` : ''}
           </span>
         </div>
       )
+    }
 
     case 'generating':
       return (

@@ -216,10 +216,16 @@ export const monitorActions = {
         // Merge: update existing, add new, but keep our more-fresh WS data
         const existing = state.requests[modelId] || []
         const merged = [...existing]
+        const stageOrder = ['queued', 'prefilling', 'generating', 'sending', 'completed', 'error']
         for (const req of data.requests) {
           const idx = merged.findIndex(r => r.request_id === req.request_id)
           if (idx >= 0) {
-            // Only overwrite if the polled data is more recent (it shouldn't be if WS is active)
+            // Update from polling if stage has advanced (never go backwards)
+            const currentRank = stageOrder.indexOf(merged[idx].stage)
+            const polledRank = stageOrder.indexOf(req.stage)
+            if (polledRank > currentRank) {
+              merged[idx] = req
+            }
           } else {
             merged.push(req)
           }

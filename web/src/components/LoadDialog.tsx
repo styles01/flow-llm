@@ -43,6 +43,8 @@ export function LoadDialog({ model, onClose }: LoadDialogProps) {
   const [chatTemplateFile, setChatTemplateFile] = useState('')
   const [trustRemoteCode, setTrustRemoteCode] = useState(false)
   const [mlxModelType, setMlxModelType] = useState('lm')
+  const [draftModelPath, setDraftModelPath] = useState('')
+  const [numDraftTokens, setNumDraftTokens] = useState(2)
 
   function applyLoadPreset(preset: Preset) {
     const lp = preset.load_params
@@ -55,6 +57,8 @@ export function LoadDialog({ model, onClose }: LoadDialogProps) {
     if (lp.mlx_model_type != null) setMlxModelType(lp.mlx_model_type)
     if (lp.mlx_chat_template_file != null) setChatTemplateFile(lp.mlx_chat_template_file)
     if (lp.mlx_trust_remote_code != null) setTrustRemoteCode(lp.mlx_trust_remote_code)
+    if (lp.draft_model_path != null) setDraftModelPath(lp.draft_model_path)
+    if (lp.num_draft_tokens != null) setNumDraftTokens(lp.num_draft_tokens)
     if (lp.ctx_size != null) setCtxSize(lp.ctx_size)
     if (lp.n_parallel != null) setNParallel(lp.n_parallel)
   }
@@ -100,6 +104,8 @@ export function LoadDialog({ model, onClose }: LoadDialogProps) {
       mlx_chat_template_file: isMLX ? (chatTemplateFile || undefined) : undefined,
       mlx_trust_remote_code: isMLX ? trustRemoteCode : undefined,
       mlx_model_type: isMLX ? mlxModelType : undefined,
+      draft_model_path: isMLX ? (draftModelPath || undefined) : undefined,
+      num_draft_tokens: isMLX ? numDraftTokens : undefined,
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['models'] })
@@ -485,6 +491,39 @@ export function LoadDialog({ model, onClose }: LoadDialogProps) {
                     </select>
                     <p className="text-xs text-gray-500 mt-1">
                       Use multimodal for vision-language models (VLMs)
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-1">
+                      Draft Model Path (speculative decoding)
+                    </label>
+                    <input
+                      type="text"
+                      value={draftModelPath}
+                      onChange={e => setDraftModelPath(e.target.value)}
+                      placeholder="HuggingFace ID or local path to MTP drafter"
+                      className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      MTP drafter model for 2-3x throughput. Leave empty to skip speculative decoding.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-1">
+                      Num Draft Tokens
+                    </label>
+                    <input
+                      type="number"
+                      value={numDraftTokens}
+                      onChange={e => setNumDraftTokens(Number(e.target.value))}
+                      min={1}
+                      max={8}
+                      className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Tokens to draft per step. Higher = faster but may reduce acceptance rate.
                     </p>
                   </div>
                 </div>

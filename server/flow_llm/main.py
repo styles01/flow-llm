@@ -4,6 +4,7 @@ import asyncio
 import html as _html
 import json
 import logging
+import os
 import re
 import time
 import uuid
@@ -31,6 +32,7 @@ from flow_llm.database import Model, Telemetry, init_db, migrate_legacy_registry
 from flow_llm.hardware import get_hardware_info, estimate_model_memory
 from flow_llm.hf_client import HuggingFaceClient
 from flow_llm.process_manager import process_manager, BackendProcess
+from flow_llm.jit_manager import jit_manager
 from flow_llm.template_validator import validate_model_dir
 
 logger = logging.getLogger(__name__)
@@ -116,7 +118,6 @@ BUILTIN_PRESETS = [
         "builtin": True,
         "load_params": {
             "mlx_context_length": 32768,
-            "mlx_model_type": "multimodal",
         },
         "config": {"temperature": 1.0},
     },
@@ -307,6 +308,9 @@ class ModelLoadRequest(BaseModel):
     mlx_chat_template_file: str = ""
     mlx_trust_remote_code: bool = False
     mlx_model_type: str = "lm"  # "lm" | "multimodal"
+    # Speculative decoding (MLX only)
+    draft_model_path: str = ""  # HuggingFace ID or local path to MTP drafter
+    num_draft_tokens: int = 2   # tokens to draft per step
 
 
 class ModelUnloadRequest(BaseModel):
@@ -400,12 +404,13 @@ async def _auto_detect_backends():
                 session.close()
 
             # Register with process manager using the DB ID
-            process_manager.register_external(
+            await process_manager.register_external(
                 model_id=db_id,
                 backend="gguf",
                 base_url=url,
                 port=port,
             )
+            await jit_manager.track_external(db_id)
             print(f"[Flow] Registered external backend: {db_id} on port {port}")
             logger.info(f"Registered external backend: {db_id} on port {port}")
 
@@ -426,6 +431,14 @@ async def lifespan(app: FastAPI):
     settings.ensure_dirs()
     settings.load_from_disk()
     settings.ensure_dirs()
+
+    # Initialize JIT manager from persisted settings
+    jit_manager.set_config(
+        enabled=settings.jit_enabled,
+        cooldown_enabled=settings.jit_cooldown_enabled,
+        cooldown_seconds=settings.jit_cooldown_seconds,
+    )
+
     db_session_factory = init_db(settings.db_path)
     hf_client = HuggingFaceClient(token=None)  # TODO: load from config
 
@@ -473,6 +486,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down backends...")
+    await jit_manager.cleanup()
     await process_manager.stop_all()
     logger.info("Flow LLM stopped.")
 
@@ -1137,12 +1151,13 @@ async def connect_external_model(request: ConnectExternalRequest):
         session.close()
 
     # Register with process manager as external
-    process_manager.register_external(
+    await process_manager.register_external(
         model_id=model_id,
         backend=request.backend,
         base_url=base_url,
         port=port,
     )
+    await jit_manager.track_external(model_id)
 
     await broadcast("model_loaded", {"model_id": model_id, "port": port})
 
@@ -1247,6 +1262,8 @@ async def load_model(model_id: str, request: ModelLoadRequest):
                 mlx_chat_template_file=chat_template_file,
                 mlx_trust_remote_code=request.mlx_trust_remote_code,
                 mlx_model_type=request.mlx_model_type,
+                draft_model_path=request.draft_model_path if model.backend == "mlx" else "",
+                num_draft_tokens=request.num_draft_tokens if model.backend == "mlx" else 2,
             )
 
             model.status = "running"
@@ -1259,6 +1276,9 @@ async def load_model(model_id: str, request: ModelLoadRequest):
                 "port": proc.port,
                 "pid": proc.get_pid(),
             })
+
+            # Register with JIT manager for access tracking and cooldown
+            await jit_manager.record_access(model_id)
 
             return {
                 "model_id": model_id,
@@ -1290,12 +1310,19 @@ async def unload_model(model_id: str):
         print(f"[Flow] Model {model_id} is running on port {port}")
         logger.info(f"Unloading model {model_id} on port {port}")
 
-        # Try stopping by model_id first, then try with .gguf suffix
-        stopped = await process_manager.stop_model(model_id)
-        print(f"[Flow] stop_model('{model_id}') = {stopped}")
-        if not stopped:
-            stopped = await process_manager.stop_model(model_id + ".gguf")
-            print(f"[Flow] stop_model('{model_id}.gguf') = {stopped}")
+        # Cancel any pending JIT cooldown and block JIT from re-loading during unload
+        await jit_manager.cancel_cooldown(model_id)
+        await jit_manager.mark_unloading(model_id)
+
+        try:
+            # Try stopping by model_id first, then try with .gguf suffix
+            stopped = await process_manager.stop_model(model_id)
+            print(f"[Flow] stop_model('{model_id}') = {stopped}")
+            if not stopped:
+                stopped = await process_manager.stop_model(model_id + ".gguf")
+                print(f"[Flow] stop_model('{model_id}.gguf') = {stopped}")
+        finally:
+            jit_manager.unmark_unloading(model_id)
 
         # If process_manager doesn't know about it, kill whatever is on that port
         if not stopped and port:
@@ -1492,9 +1519,299 @@ async def get_telemetry(model_id: Optional[str] = None, limit: int = 100):
 # --- OpenAI-Compatible Proxy ---
 
 
+def _normalize_model_id(name: str) -> str:
+    """Strip .gguf suffix for consistent lookups everywhere."""
+    if name.endswith(".gguf"):
+        return name[:-5]
+    return name
+
+
+def _resolve_load_params(model) -> dict:
+    """Auto-detect tool-call-parser, reasoning-parser, and chat-template for a model.
+
+    Extracted from the manual load_model endpoint so both manual and JIT
+    loads use the same auto-detection logic.
+    """
+    tool_call_parser = ""
+    reasoning_parser = ""
+    chat_template_file = ""
+    enable_auto_tool_choice = False
+
+    name = model.id.lower() if hasattr(model, 'id') else ""
+    supports_tools = getattr(model, 'supports_tools', None)
+
+    if not tool_call_parser and supports_tools is True:
+        if "qwen" in name:
+            if "3.5" in name:
+                tool_call_parser = "qwen3_coder"
+            else:
+                tool_call_parser = "qwen3"
+            if not reasoning_parser:
+                reasoning_parser = "qwen3"
+        if "qwen" in name and not chat_template_file:
+            default_tpl = (
+                Path(__file__).parent.parent.parent
+                / "templates"
+                / "qwen36_tools_hermes.jinja"
+            )
+            if default_tpl.exists():
+                chat_template_file = str(default_tpl)
+
+    if supports_tools is True:
+        enable_auto_tool_choice = True
+
+    return {
+        "tool_call_parser": tool_call_parser,
+        "reasoning_parser": reasoning_parser,
+        "chat_template_file": chat_template_file,
+        "enable_auto_tool_choice": enable_auto_tool_choice,
+    }
+
+
 def _available_model_ids() -> list[str]:
     """Return all currently routed model ids."""
     return list(process_manager.get_all_processes().keys())
+
+
+# ---------------------------------------------------------------------------
+# JIT model loading helpers
+# ---------------------------------------------------------------------------
+
+
+async def _unload_model_internal(model_id: str) -> bool:
+    """Unload a model programmatically (used by cooldown and eviction).
+
+    Safe to call for already-unloaded models (returns False).
+    """
+    print(f"[Flow] _unload_model_internal('{model_id}')")
+    session = db_session_factory()
+    try:
+        model = session.query(Model).filter(Model.id == model_id).first()
+        if not model or model.status != "running":
+            return False
+
+        port = model.port
+        model.status = "available"
+        model.port = None
+        model.pid = None
+        session.commit()
+
+        stopped = await process_manager.stop_model(model_id)
+        if not stopped and port:
+            stopped = await process_manager._kill_port(port)
+
+        await broadcast("model_unloaded", {"model_id": model_id})
+        _model_configs.pop(model_id, None)
+        return True
+    except Exception:
+        logger.exception(f"Error in _unload_model_internal for '{model_id}'")
+        return False
+    finally:
+        session.close()
+
+
+async def _get_loaded_model_memory() -> float:
+    """Estimate total memory used by currently loaded AND loading models."""
+    total = 0.0
+    session = db_session_factory()
+    try:
+        models = session.query(Model).filter(
+            Model.status.in_(["running", "loading"])
+        ).all()
+        for m in models:
+            if m.size_gb:
+                total += estimate_model_memory(
+                    m.size_gb,
+                    settings.default_ctx_size * settings.default_n_parallel,
+                    settings.default_cache_type_k,
+                )
+    finally:
+        session.close()
+    return total
+
+
+async def _ensure_memory_for_model(model_dict: dict) -> tuple[bool, str | None]:
+    """Check memory and evict idle models if needed. Returns (can_load, error)."""
+    model_size = model_dict.get("size_gb")
+    if model_size is None:
+        return False, f"Model '{model_dict['id']}' has unknown size — cannot JIT-load safely"
+
+    hw = get_hardware_info()
+    est_new = estimate_model_memory(
+        model_size,
+        settings.default_ctx_size * settings.default_n_parallel,
+        settings.default_cache_type_k,
+    )
+    usable_gb = hw.memory_total_gb - max(8, hw.memory_total_gb * 0.15)
+
+    if est_new > usable_gb:
+        return False, (
+            f"Insufficient memory: need {est_new:.1f}GB, "
+            f"have {usable_gb:.1f}GB usable ({hw.memory_total_gb:.0f}GB total - headroom)"
+        )
+
+    currently_used = await _get_loaded_model_memory()
+    available_for_new = usable_gb - currently_used
+
+    if available_for_new >= est_new:
+        return True, None
+
+    # Try evicting idle models
+    candidates = jit_manager.get_eviction_candidates()
+    for candidate_id in candidates:
+        logger.info(f"Evicting idle model '{candidate_id}' to free memory for '{model_dict['id']}'")
+        await _unload_model_internal(candidate_id)
+
+        hw2 = get_hardware_info()
+        currently_used2 = await _get_loaded_model_memory()
+        available_for_new2 = usable_gb - currently_used2
+        if available_for_new2 >= est_new:
+            return True, None
+
+    return False, (
+        f"Insufficient memory: need {est_new:.1f}GB for model, "
+        f"have {hw.memory_available_gb:.1f}GB available. "
+        f"No idle models eligible for eviction."
+    )
+
+
+async def _jit_load_model(model_dict: dict) -> Any:
+    """Load a model via JIT. Uses per-model load_lock to prevent duplicate loads."""
+    model_id = model_dict["id"]
+    info = jit_manager._get_or_create_info(model_id)
+
+    async with info.load_lock:
+        # Double-check: another concurrent request may have loaded it
+        proc = process_manager.get_process(model_id)
+        if proc is not None:
+            return proc
+
+        model_path = model_dict.get("gguf_file") or model_dict.get("mlx_path")
+        if not model_path or not Path(model_path).exists():
+            raise RuntimeError(f"Model file not found: {model_path}")
+
+        backend = model_dict.get("backend", "gguf")
+
+        session = db_session_factory()
+        try:
+            model = session.query(Model).filter(Model.id == model_id).first()
+
+            # If model.status == "error", reset for retry (same as manual load)
+            if model and model.status == "error":
+                model.status = "available"
+            if model:
+                model.status = "loading"
+                session.commit()
+
+            # Auto-detect parsers / templates
+            lp = _resolve_load_params(model)
+
+            proc = await process_manager.start_model(
+                model_id=model_id,
+                backend=backend,
+                model_path=model_path,
+                ctx_size=settings.default_ctx_size * settings.default_n_parallel,
+                flash_attn=settings.default_flash_attn,
+                cache_type_k=settings.default_cache_type_k,
+                cache_type_v=settings.default_cache_type_v,
+                gpu_layers=settings.default_gpu_layers,
+                n_parallel=settings.default_n_parallel,
+                mlx_context_length=lp.get("mlx_context_length", 0),
+                mlx_enable_auto_tool_choice=lp["enable_auto_tool_choice"],
+                mlx_reasoning_parser=lp["reasoning_parser"],
+                mlx_tool_call_parser=lp["tool_call_parser"],
+                mlx_chat_template_file=lp["chat_template_file"],
+            )
+
+            if model:
+                model.status = "running"
+                model.port = proc.port
+                model.pid = proc.get_pid()
+                session.commit()
+
+            # Wait for backend to be fully ready (health + warmup)
+            for _ in range(60):
+                if await _check_backend_ready(proc.base_url):
+                    break
+                await asyncio.sleep(2)
+
+            await broadcast("model_loaded", {
+                "model_id": model_id, "port": proc.port, "pid": proc.get_pid(),
+            })
+
+            await jit_manager.record_access(model_id)
+            logger.info(f"JIT-loaded model '{model_id}' on port {proc.port}")
+            return proc
+        except Exception:
+            if model:
+                model.status = "error"
+                session.commit()
+            raise
+        finally:
+            session.close()
+
+
+async def _resolve_model_for_jit(model_name: str) -> tuple[Any, str | None]:
+    """Resolve a model process, using JIT loading if needed.
+
+    Returns (process, error_message). If error_message is not None,
+    the caller should return an error response.
+    """
+    model_name = _normalize_model_id(model_name)
+    proc = process_manager.get_process(model_name)
+    if proc is not None:
+        return proc, None
+
+    # Model not loaded — try JIT
+    if not jit_manager.jit_enabled:
+        return None, f"Model '{model_name}' is not loaded"
+
+    # Don't JIT-load a model that's currently being explicitly unloaded
+    if jit_manager.is_unloading(model_name):
+        return None, f"Model '{model_name}' is being unloaded — please retry"
+
+    # Look up model in database
+    session = db_session_factory()
+    try:
+        from sqlalchemy import func
+        model = (
+            session.query(Model)
+            .filter(
+                (func.lower(Model.id) == model_name.lower())
+                | (func.lower(Model.name) == model_name.lower())
+            )
+            .first()
+        )
+        if not model:
+            return None, f"Model '{model_name}' not found in registry"
+
+        if model.status == "loading":
+            return None, "Model is currently loading — please retry"
+
+        model_dict = {
+            "id": model.id,
+            "name": model.name,
+            "backend": model.backend,
+            "gguf_file": model.gguf_file,
+            "mlx_path": model.mlx_path,
+            "size_gb": model.size_gb,
+            "supports_tools": model.supports_tools,
+        }
+    finally:
+        session.close()
+
+    # Circuit breaker: ensure memory
+    can_load, error = await _ensure_memory_for_model(model_dict)
+    if not can_load:
+        return None, error
+
+    # Load the model via JIT
+    try:
+        proc = await _jit_load_model(model_dict)
+        return proc, None
+    except Exception as e:
+        logger.exception(f"JIT load failed for '{model_name}'")
+        return None, f"JIT load failed: {e}"
 
 
 def _anthropic_error_response(
@@ -1572,10 +1889,30 @@ def _anthropic_stream_error_event(error_type: str, message: str) -> str:
     )
 
 
+def _capture_proxy_request(endpoint: str, request: dict) -> None:
+    """Persist raw proxy requests for later Hermes/OpenClaw handshake replay."""
+    if os.environ.get("FLOW_CAPTURE_REQUESTS") not in {"1", "true", "TRUE", "yes", "YES"}:
+        return
+
+    try:
+        capture_root = Path(os.environ.get("FLOW_CAPTURE_DIR", "debugging/captured_requests"))
+        day_dir = capture_root / time.strftime("%Y%m%d")
+        day_dir.mkdir(parents=True, exist_ok=True)
+        safe_endpoint = endpoint.strip("/").replace("/", "_") or "root"
+        model = str(request.get("model") or "unknown").replace("/", "__")
+        digest = uuid.uuid5(uuid.NAMESPACE_URL, json.dumps(request, sort_keys=True, default=str)).hex[:12]
+        path = day_dir / f"{int(time.time())}_{safe_endpoint}_{model}_{digest}.json"
+        path.write_text(json.dumps(request, indent=2, sort_keys=True))
+    except Exception as exc:
+        logger.warning("Failed to capture proxy request: %s", exc)
+
+
 @app.post("/v1/messages")
 async def anthropic_messages(request: dict):
     """Anthropic-compatible Messages API endpoint for Claude Code and AI-run."""
     from flow_llm.request_tracker import create_request, update_request, complete_request, error_request
+
+    _capture_proxy_request("/v1/messages", request)
 
     anthro_request_id = make_request_id()
     anthro_input_estimate = _estimate_input_tokens(request.get("messages", []))
@@ -1586,17 +1923,28 @@ async def anthropic_messages(request: dict):
         return _anthropic_error_response(exc.status_code, exc.error_type, exc.message, anthro_request_id)
 
     model_name = openai_request.get("model", "")
+    model_name = _normalize_model_id(model_name)
     proc = process_manager.get_process(model_name)
     track_id = create_request(model_name, "/v1/messages")
 
+    # -- JIT resolution --
     if not proc:
-        error_request(track_id, f"Model '{model_name}' is not loaded")
-        return _anthropic_error_response(
-            400,
-            "invalid_request_error",
-            f"Model '{model_name}' is not loaded. Available: {_available_model_ids()}",
-            anthro_request_id,
-        )
+        if not jit_manager.jit_enabled:
+            error_request(track_id, f"Model '{model_name}' is not loaded")
+            return _anthropic_error_response(
+                400,
+                "invalid_request_error",
+                f"Model '{model_name}' is not loaded. Available: {_available_model_ids()}",
+                anthro_request_id,
+            )
+
+        proc, jit_error = await _resolve_model_for_jit(model_name)
+        if jit_error:
+            is_overloaded = "memory" in jit_error.lower() or "loading" in jit_error.lower() or "unloaded" in jit_error.lower()
+            status_code = 503 if is_overloaded else 400
+            error_type = "overloaded_error" if is_overloaded else "invalid_request_error"
+            error_request(track_id, jit_error)
+            return _anthropic_error_response(status_code, error_type, jit_error, anthro_request_id)
 
     if not getattr(proc, "backend_ready", True):
         error_request(track_id, "Model is still loading")
@@ -1606,6 +1954,9 @@ async def anthropic_messages(request: dict):
             "Model is still warming up — please retry in a few seconds",
             anthro_request_id,
         )
+
+    # Record access (resets cooldown)
+    await jit_manager.record_access(model_name)
 
     start_time = time.monotonic()
     backend_url = proc.base_url
@@ -1730,6 +2081,8 @@ async def anthropic_messages(request: dict):
                     tokens_per_sec=tokens_per_sec,
                     error=stream_error_message,
                 )
+                # Start cooldown after streaming request completes
+                await jit_manager.start_cooldown(model_name)
 
         return StreamingResponse(
             stream_anthropic_events(),
@@ -1814,6 +2167,9 @@ async def anthropic_messages(request: dict):
         total_tokens=total_tokens,
         tokens_per_sec=tokens_per_sec,
     )
+    # Start cooldown after non-streaming request completes
+    await jit_manager.start_cooldown(model_name)
+
     return JSONResponse(
         content=anthropic_result,
         headers={"request-id": anthro_request_id},
@@ -1860,14 +2216,25 @@ async def chat_completions(request: dict):
     responses transparently — no prompt modification.
     """
     from flow_llm.request_tracker import create_request, update_request, complete_request, error_request
+    _capture_proxy_request("/v1/chat/completions", request)
+
     model_name = request.get("model", "")
+    model_name = _normalize_model_id(model_name)
     proc = process_manager.get_process(model_name)
 
     track_id = create_request(model_name, "/v1/chat/completions")
 
+    # -- JIT resolution --
     if not proc:
-        error_request(track_id, f"Model '{model_name}' is not loaded")
-        raise HTTPException(404, f"Model '{model_name}' is not loaded. Available: {list(process_manager.get_all_processes().keys())}")
+        if not jit_manager.jit_enabled:
+            error_request(track_id, f"Model '{model_name}' is not loaded")
+            raise HTTPException(404, f"Model '{model_name}' is not loaded. Available: {list(process_manager.get_all_processes().keys())}")
+
+        proc, jit_error = await _resolve_model_for_jit(model_name)
+        if jit_error:
+            is_overloaded = "memory" in jit_error.lower() or "loading" in jit_error.lower() or "unloaded" in jit_error.lower()
+            error_request(track_id, jit_error)
+            raise HTTPException(503 if is_overloaded else 400, jit_error)
 
     # Guard: if the backend process hasn't finished loading weights yet, reject
     # the request cleanly rather than letting it through to a half-warm model.
@@ -1877,12 +2244,21 @@ async def chat_completions(request: dict):
         error_request(track_id, "Model is still loading")
         raise HTTPException(503, "Model is still warming up — please retry in a few seconds")
 
+    # Record access (resets cooldown)
+    await jit_manager.record_access(model_name)
+
     start_time = time.monotonic()
     backend_url = proc.base_url
 
+    # mlx-openai-server identifies models by filesystem path, so rewrite
+    # the Flow model ID to the path the backend actually knows.
+    if getattr(proc, "backend", "") == "mlx":
+        req_body = {**request, "model": getattr(proc, "model_path", model_name)}
+    else:
+        req_body = {**request}
+
     # Inject per-model runtime config — caller values always take precedence
     _cfg = _model_configs.get(model_name, {})
-    req_body = {**request}
     if _cfg:
         for _k in ("temperature", "top_p", "top_k", "presence_penalty", "repetition_penalty"):
             if _k in _cfg and _k not in req_body:
@@ -1943,7 +2319,7 @@ async def chat_completions(request: dict):
             # ("Alright, James", "The", etc.).
             # Fix: drop max_tokens when a reasoning parser is active — the context
             # window (262K) is the real cap, so this is safe.
-            if proc.mlx_reasoning_parser and "max_tokens" in ns_body:
+            if getattr(proc, "mlx_reasoning_parser", "") and "max_tokens" in ns_body:
                 ns_body = {k: v for k, v in ns_body.items() if k != "max_tokens"}
             # DEBUG: log key request fields
             print(
@@ -1957,14 +2333,40 @@ async def chat_completions(request: dict):
             request_input_estimate = _estimate_input_tokens(req_body)
 
             async def stream_tool_calls_via_nonstreaming():
+                update_request(track_id, stage="prefilling")
                 client = httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=600.0, write=30.0, pool=30.0))
                 try:
-                    resp = await client.post(
+                    # Use a send+stream pattern with heartbeats so the client
+                    # doesn't time out during long prompt processing.
+                    backend_req = client.build_request(
+                        "POST",
                         f"{backend_url}/v1/chat/completions",
                         json=ns_body,
                         headers={"Content-Type": "application/json"},
                     )
-                    result = _rescue_tool_calls(resp.json())
+                    resp = await client.send(backend_req, stream=True)
+
+                    # Emit heartbeat comments during body transfer
+                    body_chunks: list[bytes] = []
+                    heartbeat_interval = 2.0
+                    last_beat = time.monotonic()
+                    async for chunk in resp.aiter_bytes():
+                        body_chunks.append(chunk)
+                        now = time.monotonic()
+                        if now - last_beat >= heartbeat_interval:
+                            yield ": heartbeat\n\n"
+                            last_beat = now
+
+                    resp_body = b"".join(body_chunks)
+                    if resp.status_code >= 400:
+                        payload, raw_text = _safe_parse_json_text(resp_body.decode())
+                        status_code, error_type, message = _map_backend_error(
+                            resp.status_code, payload, raw_text, model_name,
+                        )
+                        error_request(track_id, message)
+                        yield f"data: {json.dumps({'error': {'type': error_type, 'message': message}})}\n\ndata: [DONE]\n\n"
+                        return
+                    result = _rescue_tool_calls(json.loads(resp_body))
                     # DEBUG: log what the backend actually returned
                     _choices = result.get("choices", [])
                     for _c in _choices:
@@ -2002,6 +2404,7 @@ async def chat_completions(request: dict):
                     total_tokens=total_tokens,
                     tokens_per_sec=tokens_per_sec,
                 )
+                await jit_manager.start_cooldown(model_name)
 
                 # Convert the complete response into SSE chunks.
                 # Emit: role chunk → tool_calls / content chunk → finish chunk → [DONE]
@@ -2039,6 +2442,12 @@ async def chat_completions(request: dict):
                     # Chunk 2b: tool_calls or content
                     tool_calls = msg.get("tool_calls")
                     content = msg.get("content") or ""
+                    # Guard: if thinking consumed the entire token budget, content may
+                    # be empty. Fall back to reasoning_content so the client stores
+                    # *something* meaningful instead of an empty message that poisons
+                    # future turns.
+                    if not content and not tool_calls and msg.get("reasoning_content"):
+                        content = msg["reasoning_content"]
                     if tool_calls:
                         tc_chunk = {
                             "id": completion_id,
@@ -2095,23 +2504,40 @@ async def chat_completions(request: dict):
                     headers={"Content-Type": "application/json"},
                 ) as response:
                     update_request(track_id, stage="prefilling")
-                    async for line in response.aiter_lines():
-                        if line.startswith("data: "):
-                            data = line[6:]
+                    # Buffer partial lines while emitting heartbeats during
+                    # prompt processing so the client doesn't time out.
+                    buf = ""
+                    heartbeat_interval = 2.0
+                    last_beat = time.monotonic()
+                    async for raw in response.aiter_bytes():
+                        now = time.monotonic()
+                        if now - last_beat >= heartbeat_interval:
+                            yield ": heartbeat\n\n"
+                            last_beat = now
+                        buf += raw.decode()
+                        while "\n" in buf:
+                            line, buf = buf.split("\n", 1)
+                            stripped = line.strip()
+                            if not stripped:
+                                yield "\n"
+                                continue
+                            if not stripped.startswith("data: "):
+                                yield line + "\n"
+                                continue
+                            data = stripped[6:]
                             if data == "[DONE]":
                                 update_request(track_id, stage="sending")
                                 yield "data: [DONE]\n\n"
+                                buf = ""
                                 break
                             try:
                                 chunk = json.loads(data)
-                                # Count output tokens from usage if available
                                 usage = chunk.get("usage")
                                 if usage:
                                     if usage.get("prompt_tokens"):
                                         input_tokens = usage["prompt_tokens"]
                                     if usage.get("completion_tokens"):
                                         output_tokens_from_usage = usage["completion_tokens"]
-                                # Track first token time from content or reasoning_content deltas
                                 delta = chunk.get("choices", [{}])[0].get("delta", {})
                                 if chunk.get("choices") and (delta.get("content") or delta.get("reasoning_content")):
                                     if first_token_time is None:
@@ -2119,14 +2545,9 @@ async def chat_completions(request: dict):
                                         ttft = (first_token_time - start_time) * 1000
                                         update_request(track_id, stage="generating", ttft_ms=ttft, first_token_time=first_token_time)
                                     total_output_tokens += 1
-                                    # Update token count for monitor (throttled in request_tracker)
                                     update_request(track_id, output_tokens=total_output_tokens)
                             except Exception:
                                 pass
-                            yield line + "\n"
-                        elif line.strip() == "":
-                            yield "\n"
-                        else:
                             yield line + "\n"
             except httpx.ReadTimeout:
                 stream_error = "Backend timed out — request took longer than 600s"
@@ -2160,6 +2581,7 @@ async def chat_completions(request: dict):
                 total_tokens=final_total_tokens,
                 tokens_per_sec=tokens_per_sec,
             )
+            await jit_manager.start_cooldown(model_name)
 
         return StreamingResponse(
             stream_with_metrics(),
@@ -2169,8 +2591,9 @@ async def chat_completions(request: dict):
         # Non-streaming response — use long timeout for deep thinking/reasoning
         # Drop max_tokens when a reasoning parser is active so thinking tokens don't
         # eat the client's budget before the actual response begins.
-        if proc.mlx_reasoning_parser and "max_tokens" in req_body:
+        if getattr(proc, "mlx_reasoning_parser", "") and "max_tokens" in req_body:
             req_body = {k: v for k, v in req_body.items() if k != "max_tokens"}
+        update_request(track_id, stage="prefilling")
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=600.0, write=30.0, pool=30.0)) as client:
                 response = await client.post(
@@ -2180,6 +2603,12 @@ async def chat_completions(request: dict):
                 )
 
                 result = _rescue_tool_calls(response.json())
+                # Guard: if thinking consumed the token budget, ensure the client
+                # never sees an empty message (it would poison future turns).
+                for _dc in result.get("choices", []):
+                    _dm = _dc.get("message", {})
+                    if _dm and not _dm.get("content") and not _dm.get("tool_calls") and _dm.get("reasoning_content"):
+                        _dm["content"] = _dm["reasoning_content"]
                 # DEBUG: log non-streaming path result
                 for _dc in result.get("choices", []):
                     _dm = _dc.get("message", {})
@@ -2216,6 +2645,7 @@ async def chat_completions(request: dict):
                     total_tokens=total_tokens,
                     tokens_per_sec=tokens_per_sec,
                 )
+                await jit_manager.start_cooldown(model_name)
 
                 return result
         except httpx.ReadTimeout:
@@ -2234,16 +2664,42 @@ async def chat_completions(request: dict):
 
 @app.get("/v1/models")
 async def list_available_models():
-    """List models available through the proxy (OpenAI-compatible format)."""
+    """List models available through the proxy (OpenAI-compatible format).
+
+    Returns running models AND loading models so clients (OpenClaw, etc.)
+    can discover models that JIT loading can serve.
+    """
     processes = process_manager.get_all_processes()
+    seen = set()
     data = []
     for model_id, proc in processes.items():
+        seen.add(model_id)
         data.append({
             "id": model_id,
             "object": "model",
             "created": int(time.time()),
             "owned_by": "flow",
         })
+
+    # Also include models in "loading" status from DB (for JIT discovery)
+    if jit_manager.jit_enabled:
+        session = db_session_factory()
+        try:
+            loading_models = session.query(Model).filter(
+                Model.status.in_(["available", "loading"])
+            ).all()
+            for m in loading_models:
+                if m.id not in seen:
+                    seen.add(m.id)
+                    data.append({
+                        "id": m.id,
+                        "object": "model",
+                        "created": int(time.time()),
+                        "owned_by": "flow",
+                    })
+        finally:
+            session.close()
+
     return {"object": "list", "data": data}
 
 
@@ -2301,6 +2757,9 @@ class UpdateSettingsRequest(BaseModel):
     default_gpu_layers: Optional[int] = None
     default_n_parallel: Optional[int] = None
     auto_update_backends: Optional[bool] = None
+    jit_enabled: Optional[bool] = None
+    jit_cooldown_enabled: Optional[bool] = None
+    jit_cooldown_seconds: Optional[int] = None
 
 
 @app.get("/api/settings")
@@ -2316,6 +2775,9 @@ async def get_settings():
         "default_n_parallel": settings.default_n_parallel,
         "models_dir": str(settings.models_dir),
         "auto_update_backends": settings.auto_update_backends,
+        "jit_enabled": settings.jit_enabled,
+        "jit_cooldown_enabled": settings.jit_cooldown_enabled,
+        "jit_cooldown_seconds": settings.jit_cooldown_seconds,
     }
 
 
@@ -2345,6 +2807,20 @@ async def update_settings(request: UpdateSettingsRequest):
         settings.default_n_parallel = request.default_n_parallel
     if request.auto_update_backends is not None:
         settings.auto_update_backends = request.auto_update_backends
+    if request.jit_enabled is not None:
+        settings.jit_enabled = request.jit_enabled
+    if request.jit_cooldown_enabled is not None:
+        settings.jit_cooldown_enabled = request.jit_cooldown_enabled
+    if request.jit_cooldown_seconds is not None:
+        if request.jit_cooldown_seconds < 30:
+            raise HTTPException(400, "jit_cooldown_seconds must be at least 30")
+        settings.jit_cooldown_seconds = request.jit_cooldown_seconds
+    # Sync JIT config to runtime manager immediately
+    jit_manager.set_config(
+        enabled=settings.jit_enabled,
+        cooldown_enabled=settings.jit_cooldown_enabled,
+        cooldown_seconds=settings.jit_cooldown_seconds,
+    )
     settings.save_to_disk()
     return {"status": "ok"}
 

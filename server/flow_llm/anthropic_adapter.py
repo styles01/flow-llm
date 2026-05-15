@@ -124,6 +124,9 @@ def to_anthropic_response(openai_response: dict[str, Any], requested_model: str)
         api_error("Backend response did not contain a message object.")
 
     content_blocks: list[dict[str, Any]] = []
+    reasoning_text = _normalize_openai_text(message.get("reasoning_content"))
+    if reasoning_text:
+        content_blocks.append({"type": "thinking", "thinking": reasoning_text})
     text_content = _normalize_openai_text(message.get("content"))
     if text_content:
         content_blocks.append({"type": "text", "text": text_content})
@@ -175,6 +178,7 @@ class AnthropicStreamTranslator:
         self.finished = False
         self.current_block: tuple[str, int] | None = None
         self.next_content_index = 0
+        self.thinking_block_index: int | None = None
         self.text_block_index: int | None = None
         self.tool_states: dict[int, _ToolStreamState] = {}
         self.stop_reason: str | None = None
@@ -207,6 +211,26 @@ class AnthropicStreamTranslator:
         if finish_reason is not None:
             tool_calls = delta.get("tool_calls") or []
             self.stop_reason = _map_stop_reason(finish_reason, bool(tool_calls))
+
+        reasoning_delta = delta.get("reasoning_content")
+        if isinstance(reasoning_delta, str) and reasoning_delta:
+            events.extend(self._ensure_message_started())
+            events.extend(self._ensure_thinking_block())
+            events.append(
+                _sse_event(
+                    "content_block_delta",
+                    {
+                        "type": "content_block_delta",
+                        "index": self.thinking_block_index,
+                        "delta": {
+                            "type": "thinking_delta",
+                            "thinking": reasoning_delta,
+                        },
+                    },
+                )
+            )
+            emitted_output = True
+            self.output_delta_count += 1
 
         content_delta = delta.get("content")
         if isinstance(content_delta, str) and content_delta:
@@ -310,6 +334,29 @@ class AnthropicStreamTranslator:
                 },
             )
         ]
+
+    def _ensure_thinking_block(self) -> list[str]:
+        if self.current_block == ("thinking", self.thinking_block_index):
+            return []
+
+        events = self._close_current_block()
+        self.thinking_block_index = self.next_content_index
+        self.next_content_index += 1
+        self.current_block = ("thinking", self.thinking_block_index)
+        events.append(
+            _sse_event(
+                "content_block_start",
+                {
+                    "type": "content_block_start",
+                    "index": self.thinking_block_index,
+                    "content_block": {
+                        "type": "thinking",
+                        "thinking": "",
+                    },
+                },
+            )
+        )
+        return events
 
     def _ensure_text_block(self) -> list[str]:
         if self.current_block == ("text", self.text_block_index):
@@ -419,6 +466,12 @@ class AnthropicStreamTranslator:
 
         block_type, key = self.current_block
         self.current_block = None
+        if block_type == "thinking":
+            index = self.thinking_block_index
+            self.thinking_block_index = None
+            if index is None:
+                return []
+            return [_sse_event("content_block_stop", {"type": "content_block_stop", "index": index})]
         if block_type == "text":
             index = self.text_block_index
             self.text_block_index = None

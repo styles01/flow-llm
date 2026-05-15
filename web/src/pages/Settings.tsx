@@ -85,6 +85,9 @@ export default function SettingsPage() {
   const [modelsDir, setModelsDir] = useState('')
   const [serverPort, setServerPort] = useState(3377)
   const [autoUpdate, setAutoUpdate] = useState(true)
+  const [jitEnabled, setJitEnabled] = useState(true)
+  const [jitCooldownEnabled, setJitCooldownEnabled] = useState(true)
+  const [jitCooldownSeconds, setJitCooldownSeconds] = useState(300)
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
@@ -98,6 +101,9 @@ export default function SettingsPage() {
       setModelsDir(savedSettings.models_dir)
       setServerPort(savedSettings.port ?? 3377)
       setAutoUpdate(savedSettings.auto_update_backends ?? true)
+      setJitEnabled(savedSettings.jit_enabled ?? true)
+      setJitCooldownEnabled(savedSettings.jit_cooldown_enabled ?? true)
+      setJitCooldownSeconds(savedSettings.jit_cooldown_seconds ?? 300)
     }
   }, [savedSettings])
 
@@ -112,6 +118,9 @@ export default function SettingsPage() {
       default_gpu_layers: gpuLayers,
       default_n_parallel: nParallel,
       auto_update_backends: autoUpdate,
+      jit_enabled: jitEnabled,
+      jit_cooldown_enabled: jitCooldownEnabled,
+      jit_cooldown_seconds: jitCooldownSeconds,
     }),
     onSuccess: () => {
       setSaved(true)
@@ -321,6 +330,57 @@ export default function SettingsPage() {
             >
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${autoUpdate ? 'translate-x-6' : 'translate-x-1'}`} />
             </button>
+          </div>
+
+          {/* JIT Loading toggle */}
+          <div className="flex items-center justify-between pt-2 border-t border-gray-800">
+            <div>
+              <p className="text-sm font-medium text-gray-300">JIT Model Loading</p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Automatically load models when an inference request arrives. When off, models must be loaded manually.
+              </p>
+            </div>
+            <button
+              onClick={() => setJitEnabled(v => !v)}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${jitEnabled ? 'bg-teal-600' : 'bg-gray-700'}`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${jitEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+
+          {/* Cooldown toggle */}
+          <div className={`flex items-center justify-between pt-2 border-t border-gray-800 ${!jitEnabled ? 'opacity-50 pointer-events-none' : ''}`}>
+            <div>
+              <p className="text-sm font-medium text-gray-300">Auto-unload (Cooldown)</p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Automatically unload idle models after the cooldown period to free memory. When off, models stay loaded indefinitely.
+              </p>
+            </div>
+            <button
+              onClick={() => setJitCooldownEnabled(v => !v)}
+              disabled={!jitEnabled}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${jitCooldownEnabled && jitEnabled ? 'bg-teal-600' : 'bg-gray-700'}`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${jitCooldownEnabled && jitEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+
+          {/* Cooldown seconds */}
+          <div className={`${!jitEnabled || !jitCooldownEnabled ? 'opacity-50 pointer-events-none' : ''}`}>
+            <label className="block text-sm font-medium text-gray-300 mb-1">
+              Cooldown Duration (seconds)
+            </label>
+            <input
+              type="number"
+              value={jitCooldownSeconds}
+              onChange={e => setJitCooldownSeconds(Number(e.target.value))}
+              min={30}
+              disabled={!jitEnabled || !jitCooldownEnabled}
+              className="w-40 px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+            />
+            <p className="text-xs text-gray-400 mt-1">
+              Models are unloaded after this many seconds of inactivity. Minimum 30 seconds.
+            </p>
           </div>
 
           {/* Save */}

@@ -127,6 +127,9 @@ export interface AppSettings {
   default_n_parallel: number
   models_dir: string
   auto_update_backends: boolean
+  jit_enabled: boolean
+  jit_cooldown_enabled: boolean
+  jit_cooldown_seconds: number
 }
 
 export interface ComponentVersion {
@@ -192,6 +195,8 @@ export interface PresetLoadParams {
   n_parallel?: number
   flash_attn?: string
   gpu_layers?: number
+  draft_model_path?: string
+  num_draft_tokens?: number
 }
 
 export interface Preset {
@@ -233,6 +238,7 @@ export const api = {
     mlx_context_length?: number; mlx_prompt_cache_size?: number; mlx_enable_auto_tool_choice?: boolean;
     mlx_reasoning_parser?: string; mlx_tool_call_parser?: string; mlx_chat_template_file?: string; mlx_trust_remote_code?: boolean;
     mlx_model_type?: string;
+    draft_model_path?: string; num_draft_tokens?: number;
   }) =>
     fetchAPI<{ model_id: string; status: string; port: number; base_url: string }>(`/models/${encodeURIComponent(id)}/load`, {
       method: 'POST',

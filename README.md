@@ -29,9 +29,10 @@ Flow LLM is a local LLM gateway for macOS. It manages GGUF and MLX models on App
 
 ## Features
 
+- **JIT Model Loading** — Models auto-load on first request and auto-unload after idle cooldown (configurable, defaults ON / 5 min). Circuit breaker prevents memory exhaustion
 - **Real-time Monitor** — Per-request lifecycle tracking (queued → prefilling → generating → completed), odometer-style token counter, WebSocket push, idle waveform
-- **OpenAI & Anthropic APIs** — Drop-in proxy for `/v1/chat/completions` and `/v1/messages`. Streaming and non-streaming, tool calling, system prompts
-- **GGUF & MLX** — Run llama.cpp GGUF models or MLX models on Apple Silicon with sensible defaults (100K context, flash attention, q4_0 KV cache)
+- **OpenAI & Anthropic APIs** — Drop-in proxy for `/v1/chat/completions` and `/v1/messages`. Streaming and non-streaming, tool calling, system prompts, reasoning/thinking block translation
+- **GGUF & MLX** — Run llama.cpp GGUF models or MLX models on Apple Silicon with sensible defaults (100K context, flash attention, q4_0 KV cache). Speculative decoding for MLX
 - **Agent-Ready** — Parallel slot support, Anthropic streaming SSE adapter, input token estimation fallback, stuck request pruning
 - **Connect External** — Adopt an already-running llama-server without restarting it. Auto-detects model name
 - **HuggingFace Browser** — Search and download models directly from the UI. Scan local directories for unregistered GGUF files
@@ -116,6 +117,8 @@ Flow ships with sensible defaults for Apple Silicon:
 | KV cache | q4_0 | 75% memory savings, enables 100K on 48GB |
 | GPU layers | -1 (all) | Metal acceleration |
 | Parallel slots | 2 | Concurrent agent requests |
+| JIT loading | On | Auto-load models on first request |
+| JIT cooldown | 300s (5 min) | Auto-unload idle models |
 | Auto-update | On | Checks backend versions on startup |
 
 Configurable in Settings page, persisted to `~/.flow/settings.json`.
@@ -227,6 +230,18 @@ Auto-detects the model name. Unloading kills the backend process and frees memor
 | `/ws` | Real-time updates (request lifecycle, slot state, metrics, model events) |
 
 ## Changelog
+
+### v1.5.0 — JIT model loading + speculative decoding
+
+**JIT (Just-In-Time) model loading** — models auto-load when an inference request arrives, then auto-unload after a configurable idle cooldown (default: 5 min). Circuit breaker prevents memory exhaustion by estimating requirements and evicting idle models oldest-first. Cooldown tasks check for active in-flight requests before unloading, so streaming responses are never interrupted. Settings persist across restarts.
+
+**Speculative decoding for MLX** — Load dialog now exposes draft model path and num draft tokens fields. Presets can carry these values. The proxy forwards them to mlx-openai-server for 2-3x throughput on supported models.
+
+**Reasoning/thinking in Anthropic streaming** — `reasoning_content` from OpenAI backends is translated to Anthropic `thinking` content blocks in both streaming SSE and non-streaming responses, fixing truncated output display for reasoning models.
+
+**Monitor polling fix** — Polling fallback no longer overwrites fresher WebSocket-pushed request state, preventing stage regression.
+
+---
 
 ### v1.1.0 — Qwen 3.6 MLX tool calling + warmup UX
 

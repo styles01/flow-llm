@@ -65,6 +65,11 @@ class Settings:
         # Update preferences
         self.auto_update_backends: bool = True
 
+        # JIT model loading
+        self.jit_enabled: bool = True
+        self.jit_cooldown_enabled: bool = True
+        self.jit_cooldown_seconds: int = 300
+
     def ensure_dirs(self):
         """Create data and models directories if they don't exist."""
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -85,6 +90,7 @@ class Settings:
                 "default_ctx_size", "default_flash_attn", "default_cache_type_k",
                 "default_cache_type_v", "default_gpu_layers", "default_n_parallel",
                 "auto_update_backends",
+                "jit_enabled", "jit_cooldown_enabled", "jit_cooldown_seconds",
             ]
             for key in persistable:
                 if key in data:
@@ -109,6 +115,9 @@ class Settings:
             "default_gpu_layers": self.default_gpu_layers,
             "default_n_parallel": self.default_n_parallel,
             "auto_update_backends": self.auto_update_backends,
+            "jit_enabled": self.jit_enabled,
+            "jit_cooldown_enabled": self.jit_cooldown_enabled,
+            "jit_cooldown_seconds": self.jit_cooldown_seconds,
         }
         sf.write_text(json.dumps(data, indent=2))
 

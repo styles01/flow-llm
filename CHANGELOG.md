@@ -2,6 +2,32 @@
 
 All notable changes to Flow LLM will be documented in this file.
 
+## [1.5.0] - 2026-05-14
+
+### Added
+- **JIT (Just-In-Time) model loading** — models auto-load when an inference request arrives, then auto-unload after a configurable cooldown period. Works like Ollama's on-demand loading.
+  - Enabled by default with a 5-minute cooldown; both toggles are configurable in Settings
+  - Circuit breaker prevents memory exhaustion: estimates needed memory, evicts idle models (oldest-first) if needed, returns 503 with a clear message if insufficient
+  - Per-model `asyncio.Lock` prevents duplicate concurrent loads of the same model
+  - Cooldown tasks check for active in-flight requests before unloading — streaming requests are never interrupted
+  - External (connected) backends are never auto-unloaded or evicted
+  - Settings persist in `~/.flow/settings.json` and survive restarts
+- **Speculative decoding support for MLX** — Draft model path and num draft tokens fields in the Load dialog, stored in presets and forwarded as `mlx_draft_model_path` / `mlx_num_draft_tokens`
+- **Reasoning content in Anthropic streaming** — `reasoning_content` from OpenAI backends is now translated to Anthropic `thinking` content blocks in both streaming SSE and non-streaming responses
+- **Thinking-dots animation** on Monitor page for queued/prefilling request stages, plus a CSS comet sweep for MLX indeterminate prefill
+- **ProcessManager thread-safety** — `asyncio.Lock` around all mutations of the internal `_processes` dict, preventing races during compound check-then-modify operations
+- **JIT state tracking** — `/v1/models` now returns models in "loading" status when JIT is enabled, fixing the chicken-and-egg problem for agents (like OpenClaw) that query models before sending requests
+
+### Fixed
+- **Duplicate system message in Chat** — when sending a message with a system prompt set, the system message was included twice (once from the prompt, once from history). Fixed by filtering out system messages from conversation history before building the request.
+- **Monitor polling fallback stage regression** — polling could overwrite WebSocket-pushed request state with stale data, causing stage to appear to go backwards. Fixed with stage-ordering guard that only applies polling updates if the stage has advanced.
+
+### Changed
+- Model name normalization: `.gguf` suffix is now consistently stripped everywhere (process manager, JIT manager, proxy endpoints)
+
+### New Files
+- `server/flow_llm/jit_manager.py` — JIT loading engine with cooldown scheduling, eviction logic, and memory circuit breaker
+
 ## [1.1.0] - 2026-04-26
 
 ### Fixed

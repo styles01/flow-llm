@@ -18,3 +18,13 @@ server/logs/
 .claude/
 logs/
 INFRASTRUCTURE.md
+artifacts/
+debugging/
+harness/
+scripts/
+testing/
+server/tests/fixtures/
+server/tests/harness_utils.py
+server/tests/test_contract_*.py
+server/mlx_bridge.py
+Agentic-test-harness.MD

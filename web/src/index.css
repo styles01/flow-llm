@@ -93,3 +93,11 @@
   0%   { transform: translateX(-100%); }
   100% { transform: translateX(200%); }
 }
+
+/* Thinking comet — indeterminate prefill for MLX (no slot progress) */
+@keyframes think-comet {
+  0%   { transform: translateX(-120%); opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { transform: translateX(220%); opacity: 0; }
+}

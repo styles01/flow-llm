@@ -249,7 +249,7 @@ export default function ChatPage() {
 
     const newMessages: Message[] = [
       { role: 'system', content: systemPrompt },
-      ...messages,
+      ...messages.filter(m => m.role !== 'system'),
       { role: 'user', content: userMessage },
     ]
     chatActions.setMessages(newMessages)
