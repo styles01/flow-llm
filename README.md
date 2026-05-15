@@ -29,7 +29,7 @@ Flow LLM is a local LLM gateway for macOS. It manages GGUF and MLX models on App
 
 ## Features
 
-- **JIT Model Loading** — Models auto-load on first request and auto-unload after idle cooldown (configurable, defaults ON / 5 min). Circuit breaker prevents memory exhaustion
+- **JIT Model Loading** — Models auto-load on first request and auto-unload after idle cooldown. Togglable in Settings (defaults ON, 5 min cooldown). Circuit breaker prevents memory exhaustion
 - **Real-time Monitor** — Per-request lifecycle tracking (queued → prefilling → generating → completed), odometer-style token counter, WebSocket push, idle waveform
 - **OpenAI & Anthropic APIs** — Drop-in proxy for `/v1/chat/completions` and `/v1/messages`. Streaming and non-streaming, tool calling, system prompts, reasoning/thinking block translation
 - **GGUF & MLX** — Run llama.cpp GGUF models or MLX models on Apple Silicon with sensible defaults (100K context, flash attention, q4_0 KV cache). Speculative decoding for MLX
@@ -88,9 +88,11 @@ curl -X POST http://localhost:3377/api/register-local \
   -d '{"gguf_path": "/path/to/model.gguf"}'
 ```
 
-### 3. Point your agent — that's it
+### 3. Point your agent
 
-JIT loading is on by default. Your first inference request will auto-load the model. No need to pre-load manually.
+**With JIT (default):** Your first inference request auto-loads the model. Nothing else to do.
+
+**Without JIT:** Turn it off in **Settings**, then load models explicitly via the **Models** page or `POST /api/models/{id}/load`.
 
 ```json
 {
@@ -233,15 +235,16 @@ Auto-detects the model name. Unloading kills the backend process and frees memor
 
 ## Changelog
 
-### v1.5.0 — JIT model loading + speculative decoding
+### v1.5.0 — JIT model loading
 
-**JIT (Just-In-Time) model loading** — models auto-load when an inference request arrives, then auto-unload after a configurable idle cooldown (default: 5 min). Circuit breaker prevents memory exhaustion by estimating requirements and evicting idle models oldest-first. Cooldown tasks check for active in-flight requests before unloading, so streaming responses are never interrupted. Settings persist across restarts.
+**JIT (Just-In-Time) model loading** is the headline feature — models auto-load when an inference request arrives, then auto-unload after a configurable idle cooldown. It's on by default but fully optional (turn it off in Settings for explicit control). Circuit breaker prevents memory exhaustion by estimating requirements and evicting idle models oldest-first. Cooldown tasks check for active in-flight requests before unloading, so streaming responses are never interrupted. Works with both GGUF and MLX backends.
 
-**Speculative decoding for MLX** — Load dialog now exposes draft model path and num draft tokens fields. Presets can carry these values. The proxy forwards them to mlx-openai-server for 2-3x throughput on supported models.
+Also in this release:
 
-**Reasoning/thinking in Anthropic streaming** — `reasoning_content` from OpenAI backends is translated to Anthropic `thinking` content blocks in both streaming SSE and non-streaming responses, fixing truncated output display for reasoning models.
-
-**Monitor polling fix** — Polling fallback no longer overwrites fresher WebSocket-pushed request state, preventing stage regression.
+- **Speculative decoding for MLX** — Draft model path and num draft tokens fields in the Load dialog, forwarded to mlx-openai-server for 2-3x throughput on supported models.
+- **Anthropic thinking blocks** — `reasoning_content` from OpenAI backends is now translated to Anthropic `thinking` content blocks in both streaming SSE and non-streaming responses.
+- **Monitor polling fix** — Polling fallback no longer overwrites fresher WebSocket-pushed request state, preventing stage regression.
+- **ProcessManager thread-safety** — `asyncio.Lock` around all mutations, preventing races during compound operations.
 
 ---
 
