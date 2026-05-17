@@ -28,3 +28,4 @@ server/tests/harness_utils.py
 server/tests/test_contract_*.py
 server/mlx_bridge.py
 Agentic-test-harness.MD
+cleanup-cruft.sh
