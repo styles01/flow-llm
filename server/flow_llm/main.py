@@ -1568,11 +1568,6 @@ def _resolve_load_params(model) -> dict:
     }
 
 
-def _available_model_ids() -> list[str]:
-    """Return all currently routed model ids."""
-    return list(process_manager.get_all_processes().keys())
-
-
 # ---------------------------------------------------------------------------
 # JIT model loading helpers
 # ---------------------------------------------------------------------------
@@ -1762,13 +1757,13 @@ async def _resolve_model_for_jit(model_name: str) -> tuple[Any, str | None]:
     if proc is not None:
         return proc, None
 
-    # Model not loaded — try JIT
+    # Model not loaded
     if not jit_manager.jit_enabled:
-        return None, f"Model '{model_name}' is not loaded"
+        return None, f"Model '{model_name}' is registered but not loaded. Enable JIT in Settings or load it explicitly."
 
     # Don't JIT-load a model that's currently being explicitly unloaded
     if jit_manager.is_unloading(model_name):
-        return None, f"Model '{model_name}' is being unloaded — please retry"
+        return None, f"Model server busy — '{model_name}' is being unloaded. Try again in a minute."
 
     # Look up model in database
     session = db_session_factory()
@@ -1930,11 +1925,12 @@ async def anthropic_messages(request: dict):
     # -- JIT resolution --
     if not proc:
         if not jit_manager.jit_enabled:
-            error_request(track_id, f"Model '{model_name}' is not loaded")
+            error_request(track_id, f"Model '{model_name}' is not loaded — JIT disabled")
             return _anthropic_error_response(
-                400,
-                "invalid_request_error",
-                f"Model '{model_name}' is not loaded. Available: {_available_model_ids()}",
+                503,
+                "server_error",
+                f"Model '{model_name}' is registered but not loaded. "
+                "Enable JIT loading in Settings or load the model explicitly.",
                 anthro_request_id,
             )
 
@@ -2227,8 +2223,8 @@ async def chat_completions(request: dict):
     # -- JIT resolution --
     if not proc:
         if not jit_manager.jit_enabled:
-            error_request(track_id, f"Model '{model_name}' is not loaded")
-            raise HTTPException(404, f"Model '{model_name}' is not loaded. Available: {list(process_manager.get_all_processes().keys())}")
+            error_request(track_id, f"Model '{model_name}' is not loaded — JIT disabled")
+            raise HTTPException(503, f"Model '{model_name}' is registered but not loaded. Enable JIT loading in Settings or load the model explicitly.")
 
         proc, jit_error = await _resolve_model_for_jit(model_name)
         if jit_error:
@@ -2664,15 +2660,17 @@ async def chat_completions(request: dict):
 
 @app.get("/v1/models")
 async def list_available_models():
-    """List models available through the proxy (OpenAI-compatible format).
+    """List all registered models (Ollama-compatible).
 
-    Returns running models AND loading models so clients (OpenClaw, etc.)
-    can discover models that JIT loading can serve.
+    Returns every model Flow knows about — running, available, loading, or
+    error. Clients see the full catalogue regardless of whether models are
+    currently loaded. This matches Ollama's /api/tags behaviour: the model
+    list represents "models we can serve," not "models in VRAM right now."
     """
-    processes = process_manager.get_all_processes()
-    seen = set()
-    data = []
-    for model_id, proc in processes.items():
+    seen: set[str] = set()
+    data: list[dict[str, Any]] = []
+
+    for model_id in process_manager.get_all_processes():
         seen.add(model_id)
         data.append({
             "id": model_id,
@@ -2681,26 +2679,71 @@ async def list_available_models():
             "owned_by": "flow",
         })
 
-    # Also include models in "loading" status from DB (for JIT discovery)
-    if jit_manager.jit_enabled:
-        session = db_session_factory()
-        try:
-            loading_models = session.query(Model).filter(
-                Model.status.in_(["available", "loading"])
-            ).all()
-            for m in loading_models:
-                if m.id not in seen:
-                    seen.add(m.id)
-                    data.append({
-                        "id": m.id,
-                        "object": "model",
-                        "created": int(time.time()),
-                        "owned_by": "flow",
-                    })
-        finally:
-            session.close()
+    session = db_session_factory()
+    try:
+        registered = session.query(Model).filter(
+            Model.status.in_(["available", "loading", "error"])
+        ).all()
+        for m in registered:
+            if m.id not in seen:
+                seen.add(m.id)
+                data.append({
+                    "id": m.id,
+                    "object": "model",
+                    "created": int(time.time()),
+                    "owned_by": "flow",
+                })
+    finally:
+        session.close()
 
     return {"object": "list", "data": data}
+
+
+@app.get("/api/tags")
+async def list_ollama_tags():
+    """Ollama-compatible model listing.
+
+    Returns all registered models in Ollama's /api/tags format so tools
+    built for Ollama (OpenClaw, etc.) can discover Flow models.
+    """
+    seen: set[str] = set()
+    models: list[dict[str, Any]] = []
+
+    session = db_session_factory()
+    try:
+        db_models = session.query(Model).filter(
+            Model.status.in_(["available", "loading", "error", "running"])
+        ).all()
+
+        for m in db_models:
+            if m.id in seen:
+                continue
+            seen.add(m.id)
+            entry: dict[str, Any] = {
+                "name": m.id,
+                "model": m.id,
+                "size": int((m.size_gb or 0) * 1e9),
+            }
+            if m.quantization:
+                entry["details"] = {
+                    "format": "gguf" if m.backend == "llamacpp" else m.backend,
+                    "family": m.backend,
+                    "quantization_level": m.quantization,
+                }
+            models.append(entry)
+    finally:
+        session.close()
+
+    # Include running models that may not be in DB
+    for model_id in process_manager.get_all_processes():
+        if model_id not in seen:
+            models.append({
+                "name": model_id,
+                "model": model_id,
+                "size": 0,
+            })
+
+    return {"models": models}
 
 
 async def _record_telemetry(
