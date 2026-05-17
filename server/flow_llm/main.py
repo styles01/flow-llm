@@ -1202,7 +1202,7 @@ async def load_model(model_id: str, request: ModelLoadRequest):
             request.ctx_size * request.n_parallel,  # matches actual allocation (line 1251)
             request.cache_type_k,
         )
-        usable_gb = hw.memory_total_gb - max(8, hw.memory_total_gb * 0.15)
+        usable_gb = hw.memory_total_gb - 2  # unified memory: 2 GB system headroom, rest is GPU-accessible
         if est_memory > usable_gb:
             raise HTTPException(
                 400,
@@ -1650,7 +1650,7 @@ async def _ensure_memory_for_model(model_dict: dict) -> tuple[bool, str | None]:
         settings.default_ctx_size * settings.default_n_parallel,
         settings.default_cache_type_k,
     )
-    usable_gb = hw.memory_total_gb - max(8, hw.memory_total_gb * 0.15)
+    usable_gb = hw.memory_total_gb - 2  # unified memory: 2 GB system headroom, rest is GPU-accessible
 
     if est_new > usable_gb:
         return False, (

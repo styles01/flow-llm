@@ -23,8 +23,8 @@ class HardwareInfo:
     @property
     def recommended_max_model_gb(self) -> float:
         """Maximum model size that fits in memory with headroom."""
-        # Leave 8GB for system, 20% of total for KV cache and context
-        headroom = max(8, self.memory_total_gb * 0.2)
+        # Unified memory: macOS only needs ~2 GB; everything else is fair game for GPU
+        headroom = 2
         return round(self.memory_total_gb - headroom, 1)
 
 
