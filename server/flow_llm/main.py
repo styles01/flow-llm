@@ -1577,32 +1577,46 @@ async def _unload_model_internal(model_id: str) -> bool:
     """Unload a model programmatically (used by cooldown and eviction).
 
     Safe to call for already-unloaded models (returns False).
+    Serializes against JIT loads via the per-model load_lock.
     """
     print(f"[Flow] _unload_model_internal('{model_id}')")
-    session = db_session_factory()
-    try:
-        model = session.query(Model).filter(Model.id == model_id).first()
-        if not model or model.status != "running":
+    info = jit_manager._get_or_create_info(model_id)
+
+    # Serialize with _jit_load_model to prevent unload/load races
+    async with info.load_lock:
+        session = db_session_factory()
+        try:
+            model = session.query(Model).filter(Model.id == model_id).first()
+            if not model or model.status != "running":
+                return False
+
+            port = model.port
+            process_id = model.pid
+
+            # Kill process FIRST, then update DB
+            stopped = await process_manager.stop_model(model_id)
+            if not stopped and port:
+                stopped = await process_manager._kill_port(port)
+
+            model.status = "available"
+            model.port = None
+            model.pid = None
+            session.commit()
+
+            if stopped:
+                await broadcast("model_unloaded", {"model_id": model_id})
+                _model_configs.pop(model_id, None)
+            else:
+                logger.warning(
+                    f"Failed to kill process for '{model_id}' (port {port}, pid {process_id}) — "
+                    "DB marked available but process may still be running"
+                )
+            return True
+        except Exception:
+            logger.exception(f"Error in _unload_model_internal for '{model_id}'")
             return False
-
-        port = model.port
-        model.status = "available"
-        model.port = None
-        model.pid = None
-        session.commit()
-
-        stopped = await process_manager.stop_model(model_id)
-        if not stopped and port:
-            stopped = await process_manager._kill_port(port)
-
-        await broadcast("model_unloaded", {"model_id": model_id})
-        _model_configs.pop(model_id, None)
-        return True
-    except Exception:
-        logger.exception(f"Error in _unload_model_internal for '{model_id}'")
-        return False
-    finally:
-        session.close()
+        finally:
+            session.close()
 
 
 async def _get_loaded_model_memory() -> float:
