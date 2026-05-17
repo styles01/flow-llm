@@ -85,6 +85,10 @@ def _detect_chip() -> str:
 def estimate_model_memory(size_gb: float, ctx_size: int, quant_kv: str = "q4_0") -> float:
     """Estimate total memory needed for a model with given context.
 
+    KV cache formula: 2 × n_layers × n_kv_heads × head_dim × bytes_per_element.
+    Since we only have size_gb, we estimate: layers × kv_heads × head_dim ∝ sqrt(size_gb).
+    Calibrated against real-world data (Qwen3-8B ≈ 144 KB/tok fp16, Qwen3.6-35B ≈ 256 KB/tok fp16).
+
     Args:
         size_gb: Model file size in GB
         ctx_size: Context window size in tokens
@@ -93,26 +97,26 @@ def estimate_model_memory(size_gb: float, ctx_size: int, quant_kv: str = "q4_0")
     Returns:
         Estimated total memory needed in GB
     """
-    # Model weights take roughly the file size
+    import math
+
     model_memory = size_gb
 
-    # KV cache estimation (very rough)
-    # For a 26B model with 2816 embedding dim and 64 layers:
-    # Per token: 2 * n_layers * n_embd * bytes_per_element
-    # This varies by model, so we use a rough heuristic
-    # ~0.5MB per token for f16, ~0.125MB per token for q4_0
-    bytes_per_token = {
-        "f32": 0.0005,
-        "f16": 0.00025,
-        "bf16": 0.00025,
-        "q8_0": 0.000125,
-        "q4_0": 0.0000625,
-        "q4_1": 0.0000625,
-        "q5_0": 0.000078125,
-        "q5_1": 0.000078125,
+    # Quantization factor relative to fp16 (2 bytes/element baseline)
+    quant_factor: dict[str, float] = {
+        "f32": 2.0,
+        "f16": 1.0,
+        "bf16": 1.0,
+        "q8_0": 0.5,
+        "q4_0": 0.25,
+        "q4_1": 0.25,
+        "q5_0": 0.3125,
+        "q5_1": 0.3125,
     }
 
-    kv_per_token_gb = bytes_per_token.get(quant_kv, 0.00025)  # default to f16
-    kv_total_gb = ctx_size * kv_per_token_gb * 2  # 2 for K and V
+    factor = quant_factor.get(quant_kv, 1.0)
 
-    return round(model_memory + kv_total_gb, 1)
+    # Total K+V cache GB per token, calibrated at q4_0:
+    # sqrt(size_gb) * 0.000017 matches Qwen3-8B and Qwen3.6-35B measured values
+    kv_per_token_gb = math.sqrt(size_gb) * 0.000017 * (factor / 0.25)
+
+    return round(model_memory + ctx_size * kv_per_token_gb, 1)

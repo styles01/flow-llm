@@ -1193,16 +1193,15 @@ async def load_model(model_id: str, request: ModelLoadRequest):
         if not model_path or not Path(model_path).exists():
             raise HTTPException(400, f"Model file not found: {model_path}")
 
-        # Check memory — on Apple Silicon, unified memory means GPU uses the same pool
+        # Check memory — on Apple Silicon, unified memory means GPU uses the same pool.
         # Use total RAM minus headroom rather than "available" because macOS keeps
-        # inactive memory that can be reclaimed, and other apps can be paged out
+        # inactive memory that can be reclaimed, and other apps can be paged out.
         hw = get_hardware_info()
         est_memory = estimate_model_memory(
             model.size_gb or 0,
-            request.ctx_size,
+            request.ctx_size * request.n_parallel,  # matches actual allocation (line 1251)
             request.cache_type_k,
         )
-        # Use total RAM minus headroom (8GB system + 20% for KV cache overhead)
         usable_gb = hw.memory_total_gb - max(8, hw.memory_total_gb * 0.15)
         if est_memory > usable_gb:
             raise HTTPException(
